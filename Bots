@@ -1,0 +1,361 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+local LP = Players.LocalPlayer
+
+pcall(function()
+	setfpscap(10)
+end)
+
+local lastRoundIdentifier = nil
+
+pcall(function()
+	Lighting.GlobalShadows = false
+	Lighting.FogEnd = 9e9
+	Lighting.Brightness = 2
+	Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+	Lighting.Ambient = Color3.fromRGB(128, 128, 128)
+
+	for _, child in ipairs(Lighting:GetChildren()) do
+		if child:IsA("PostEffect")
+			or child:IsA("Light")
+			or child:IsA("Atmosphere") then
+			child:Destroy()
+		end
+	end
+end)
+
+task.spawn(function()
+	GuiService.ErrorMessageChanged:Connect(function()
+		task.wait(1)
+
+		pcall(function()
+			TeleportService:Teleport(game.PlaceId, LP)
+		end)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		if player == LP then
+			task.wait(1)
+
+			pcall(function()
+				TeleportService:Teleport(game.PlaceId, LP)
+			end)
+		end
+	end)
+end)
+
+RunService.Stepped:Connect(function()
+	pcall(function()
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LP and player.Character then
+				for _, part in ipairs(player.Character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = false
+					end
+				end
+			end
+		end
+	end)
+end)
+
+local function EnsurePlatform()
+	local plat = Workspace:FindFirstChild("MurdererPlatform")
+
+	if not plat then
+		plat = Instance.new("Part")
+		plat.Name = "MurdererPlatform"
+		plat.Size = Vector3.new(20, 1, 20)
+		plat.Position = Vector3.new(100, 98, 100)
+		plat.Anchored = true
+		plat.BrickColor = BrickColor.new("Medium stone grey")
+		plat.Transparency = 0.9
+		plat.Parent = Workspace
+	else
+		plat.BrickColor = BrickColor.new("Medium stone grey")
+		plat.Transparency = 0.9
+	end
+end
+
+local function ShouldDestroy(obj)
+	if not obj or not obj.Parent then
+		return false
+	end
+
+	if obj.Name == "Raggy" then
+		return true
+	end
+
+	if obj:IsA("Sound") then
+		return true
+	end
+
+	if obj:IsA("Decal") and obj.Name:lower() == "face" then
+		return true
+	end
+
+	if obj.Name == "CoinContainer"
+		or obj.Name == "WeaponDisplay"
+		or obj.Name == "WeaponDisplays" then
+		return true
+	end
+
+	if obj:IsA("Accessory")
+		or obj:IsA("Hat")
+		or obj:IsA("SpecialMesh")
+		or obj:IsA("MeshPart")
+		or obj:IsA("ParticleEmitter")
+		or obj:IsA("Trail")
+		or obj:IsA("Fire")
+		or obj:IsA("Smoke")
+		or obj:IsA("Sparkles")
+		or obj:IsA("Beam")
+		or obj:IsA("Explosion")
+		or obj:IsA("Light")
+		or obj:IsA("PointLight")
+		or obj:IsA("SpotLight")
+		or obj:IsA("SurfaceLight")
+		or obj:IsA("Texture")
+		or obj:IsA("Clothing")
+		or obj:IsA("Shirt")
+		or obj:IsA("Pants")
+		or obj:IsA("ShirtGraphic")
+		or obj:IsA("FaceControls") then
+		return true
+	end
+
+	return false
+end
+
+local function CleanCharacter(character)
+	if not character then
+		return
+	end
+
+	for _, obj in ipairs(character:GetDescendants()) do
+		if ShouldDestroy(obj) then
+			pcall(function()
+				obj:Destroy()
+			end)
+		end
+	end
+end
+
+local function CleanMap()
+	EnsurePlatform()
+
+	pcall(function()
+		local displays = Workspace:FindFirstChild("WeaponDisplays")
+
+		if displays then
+			displays:Destroy()
+		end
+	end)
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if ShouldDestroy(obj) then
+			pcall(function()
+				obj:Destroy()
+			end)
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			CleanCharacter(player.Character)
+		end
+	end
+end
+
+Workspace.DescendantAdded:Connect(function(obj)
+	task.defer(function()
+		if obj and obj.Parent and ShouldDestroy(obj) then
+			pcall(function()
+				obj:Destroy()
+			end)
+		end
+	end)
+end)
+
+local function SetupCharacter(character)
+	if not character then
+		return
+	end
+
+	task.spawn(function()
+		task.wait(0.1)
+		CleanCharacter(character)
+	end)
+
+	character.DescendantAdded:Connect(function(obj)
+		task.defer(function()
+			if obj and obj.Parent and ShouldDestroy(obj) then
+				pcall(function()
+					obj:Destroy()
+				end)
+			end
+		end)
+	end)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+	if player.Character then
+		SetupCharacter(player.Character)
+	end
+
+	player.CharacterAdded:Connect(function(character)
+		SetupCharacter(character)
+	end)
+end
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		SetupCharacter(character)
+	end)
+end)
+
+LP.CharacterAdded:Connect(function(char)
+	task.spawn(function()
+		task.wait(0.2)
+
+		CleanMap()
+		CleanCharacter(char)
+	end)
+end)
+
+function CheckRole()
+	local getPlayerData =
+		ReplicatedStorage:FindFirstChild("GetPlayerData", true)
+
+	if not getPlayerData then
+		return
+	end
+
+	local success, result = pcall(function()
+		return getPlayerData:InvokeServer()
+	end)
+
+	if not success or not result then
+		return
+	end
+
+	local myRole = nil
+	local roundIdentifier = ""
+
+	for playerName, data in pairs(result) do
+		roundIdentifier =
+			roundIdentifier
+			.. playerName
+			.. (data.Role or "")
+
+		if playerName == LP.Name then
+			myRole = data.Role
+		end
+	end
+
+	if roundIdentifier ~= lastRoundIdentifier then
+
+		lastRoundIdentifier = roundIdentifier
+
+		CleanMap()
+
+		if myRole then
+
+			task.wait(1)
+
+			local character =
+				LP.Character
+				or LP.CharacterAdded:Wait()
+
+			CleanCharacter(character)
+
+			local humanoidRootPart =
+				character:WaitForChild("HumanoidRootPart", 5)
+
+			local humanoid =
+				character:WaitForChild("Humanoid", 5)
+
+			if not humanoidRootPart or not humanoid then
+				return
+			end
+
+			if myRole == "Sheriff" then
+
+				task.wait(5)
+
+				EnsurePlatform()
+
+				if LP.Character
+					and LP.Character:FindFirstChild("HumanoidRootPart")
+					and LP.Character:FindFirstChild("Humanoid") then
+
+					LP.Character.HumanoidRootPart.CFrame =
+						CFrame.new(100, 100, 100)
+
+					task.wait(0.5)
+
+					LP.Character.Humanoid.Health = 0
+				end
+
+			elseif myRole == "Hero" then
+
+				task.wait(5)
+
+				EnsurePlatform()
+
+				if LP.Character
+					and LP.Character:FindFirstChild("HumanoidRootPart")
+					and LP.Character:FindFirstChild("Humanoid") then
+
+					LP.Character.HumanoidRootPart.CFrame =
+						CFrame.new(100, 100, 100)
+
+					task.wait(0.5)
+
+					LP.Character.Humanoid.Health = 0
+				end
+
+			elseif myRole == "Murderer" then
+				local allowedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
+				local isAllowed = false
+				for _, name in ipairs(allowedNames) do
+					if LP.Name == name then
+						isAllowed = true
+						break
+					end
+				end
+
+				if not isAllowed then
+					task.wait(5)
+
+					EnsurePlatform()
+
+					if LP.Character
+						and LP.Character:FindFirstChild("HumanoidRootPart") then
+
+						LP.Character.HumanoidRootPart.CFrame =
+							CFrame.new(100, 100, 100)
+					end
+				end
+
+			elseif myRole == "Innocent" then
+
+				pcall(function()
+					humanoid.WalkSpeed = 0
+					humanoid.JumpPower = 0
+					humanoidRootPart.Anchored = true
+				end)
+			end
+		end
+	end
+end
+
+RunService.RenderStepped:Connect(function()
+	pcall(function()
+		CheckRole()
+	end)
+end)
