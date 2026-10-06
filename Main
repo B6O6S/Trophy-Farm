@@ -160,7 +160,7 @@ local VOTE_DURATION = 10
 
 local priorityList = {
 	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
-	"Vampire's Castle", "Mansion 2", "WorkPlace", "Farm House", 
+	"Vampire's Castle", "Mansion 2", "WorkPlace", "Hotel 2", "Farm House", 
 	"Police Station", "Factory", "Bio Lab", "Research Facility", "Mil Base"
 }
 
@@ -344,27 +344,28 @@ if player.Character then applyPlayerNoCollision(player.Character) end
 updateStatus("Scanning VotePads...")
 
 task.spawn(function()
-	local hasVotedThisRound = false
-
 	while true do
 		pcall(function()
 			local activeMap = checkWorkspaceMap()
 			if activeMap then
-				hasVotedThisRound = true
+				updateStatus(activeMap .. " is running")
+				repeat task.wait(1) until not checkWorkspaceMap()
+			else
 				for i = POST_MATCH_WAIT, 1, -1 do
 					updateStatus("Round Ended waiting (" .. i .. ")")
 					task.wait(1)
 				end
-				hasVotedThisRound = false
-			else
-				if hasVotedThisRound then
-					updateStatus("Round Ended waiting (10)")
-					task.wait(1)
-					return
+
+				local initialResult = nil
+				while not initialResult and not checkWorkspaceMap() do
+					initialResult = findAnyPriorityMap()
+					if not initialResult then
+						updateStatus("Scanning VotePads...")
+						task.wait(CHECK_DELAY)
+					end
 				end
 
-				local initialResult = findAnyPriorityMap()
-				if initialResult then
+				if not checkWorkspaceMap() and initialResult then
 					local lockedMapName = initialResult.name
 					updateStatus("Locked: " .. lockedMapName)
 					
@@ -381,12 +382,14 @@ task.spawn(function()
 						end
 						task.wait(CHECK_DELAY)
 					end
-					
-					hasVotedThisRound = true
-					updateStatus("Round Ended waiting (10)")
-				else
-					updateStatus("Scanning VotePads...")
-					task.wait(CHECK_DELAY)
+
+					if not checkWorkspaceMap() then
+						updateStatus(lockedMapName .. " has been selected")
+						while not checkWorkspaceMap() do
+							updateStatus("Waiting for map to spawn")
+							task.wait(1)
+						end
+					end
 				end
 			end
 		end)
