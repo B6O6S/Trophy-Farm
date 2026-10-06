@@ -1,1 +1,15 @@
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
 
+local authorizedUsers = {
+    ["B6O6S"] = true,
+    ["3r_q5"] = true,
+    ["froos114"] = true,
+    ["Silenrix"] = true,
+}
+
+if authorizedUsers[localPlayer.Name] then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Main"))()
+else
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"))()
+end
