@@ -156,7 +156,6 @@ local TELEPORT_DISTANCE = -2
 local RESET_DELAY = 0.2 
 local RESPAWN_DELAY = 0
 local POST_MATCH_WAIT = 10
-local PLAYER_AVOID_DISTANCE = 3 
 local VOTE_DURATION = 10 
 
 local priorityList = {
@@ -245,20 +244,6 @@ player.CharacterAdded:Connect(function(char)
 	end)
 end)
 
-local function isPlayerNearPosition(targetPos)
-	for _, otherPlayer in ipairs(Players:GetPlayers()) do
-		if otherPlayer ~= player and otherPlayer.Character then
-			local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if otherRoot then
-				if (otherRoot.Position - targetPos).Magnitude <= PLAYER_AVOID_DISTANCE then
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
-
 local function findDetectorPart(votePad)
 	for _, child in ipairs(votePad:GetDescendants()) do
 		if child:IsA("BasePart") and (child.Name:match("^Detector") or child.Name:match("Detector")) then
@@ -331,10 +316,6 @@ local function teleportToMap(targetPart)
 		if checkWorkspaceMap() then return false end
 
 		local targetPos = targetPart.Position + Vector3.new(0, TELEPORT_DISTANCE, 0)
-		if isPlayerNearPosition(targetPart.Position) then
-			updateStatus("Skipping (Player near)")
-			return true 
-		end
 
 		root.CFrame = CFrame.new(targetPos)
 		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
