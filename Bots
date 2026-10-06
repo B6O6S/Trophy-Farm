@@ -1,11 +1,19 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+
+local restrictedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
+for _, name in ipairs(restrictedNames) do
+	if LP.Name == name then
+		return
+	end
+end
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
-local LP = Players.LocalPlayer
 
 pcall(function()
 	setfpscap(10)
@@ -13,20 +21,37 @@ end)
 
 local lastRoundIdentifier = nil
 
-pcall(function()
+local function applyCleanSky()
 	Lighting.GlobalShadows = false
 	Lighting.FogEnd = 9e9
 	Lighting.Brightness = 2
 	Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
 	Lighting.Ambient = Color3.fromRGB(128, 128, 128)
-
-	for _, child in ipairs(Lighting:GetChildren()) do
-		if child:IsA("PostEffect")
-			or child:IsA("Light")
-			or child:IsA("Atmosphere") then
-			child:Destroy()
-		end
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
+ 
+	local existingSky = Lighting:FindFirstChildOfClass("Sky")
+	if existingSky then
+		existingSky.SkyboxBk = "rbxassetid://99742693890881"
+		existingSky.SkyboxDn = "rbxassetid://99742693890881"
+		existingSky.SkyboxFt = "rbxassetid://99742693890881"
+		existingSky.SkyboxLf = "rbxassetid://99742693890881"
+		existingSky.SkyboxRt = "rbxassetid://99742693890881"
+		existingSky.SkyboxUp = "rbxassetid://99742693890881"
+	else
+		local sky = Instance.new("Sky")
+		sky.SkyboxBk = "rbxassetid://99742693890881"
+		sky.SkyboxDn = "rbxassetid://99742693890881"
+		sky.SkyboxFt = "rbxassetid://99742693890881"
+		sky.SkyboxLf = "rbxassetid://99742693890881"
+		sky.SkyboxRt = "rbxassetid://99742693890881"
+		sky.SkyboxUp = "rbxassetid://99742693890881"
+		sky.Parent = Lighting
 	end
+end
+
+pcall(function()
+	applyCleanSky()
 end)
 
 task.spawn(function()
@@ -100,7 +125,8 @@ local function ShouldDestroy(obj)
 
 	if obj.Name == "CoinContainer"
 		or obj.Name == "WeaponDisplay"
-		or obj.Name == "WeaponDisplays" then
+		or obj.Name == "WeaponDisplays"
+		or obj.Name == "WeaponsDisplay" then
 		return true
 	end
 
@@ -150,9 +176,13 @@ local function CleanMap()
 
 	pcall(function()
 		local displays = Workspace:FindFirstChild("WeaponDisplays")
-
 		if displays then
 			displays:Destroy()
+		end
+
+		local weaponsDisplay = Workspace:FindFirstChild("WeaponsDisplay")
+		if weaponsDisplay then
+			weaponsDisplay:Destroy()
 		end
 	end)
 
@@ -227,6 +257,34 @@ LP.CharacterAdded:Connect(function(char)
 	end)
 end)
 
+pcall(function()
+	local suffix = LP.Name:match("_(.+)$")
+	if suffix then
+		LP.DisplayName = "Bot " .. suffix
+	end
+end)
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DisplayNameGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LP:WaitForChild("PlayerGui")
+
+local textLabel = Instance.new("TextLabel")
+textLabel.Name = "NameLabel"
+textLabel.Size = UDim2.new(0, 250, 0, 50)
+textLabel.Position = UDim2.new(0.5, -125, 0, 10)
+textLabel.BackgroundTransparency = 0.5
+textLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+textLabel.TextScaled = true
+textLabel.Font = Enum.Font.SourceSansBold
+textLabel.Text = LP.DisplayName
+textLabel.Parent = screenGui
+
+LP:GetPropertyChangedSignal("DisplayName"):Connect(function()
+	textLabel.Text = LP.DisplayName
+end)
+
 function CheckRole()
 	local getPlayerData =
 		ReplicatedStorage:FindFirstChild("GetPlayerData", true)
@@ -284,45 +342,70 @@ function CheckRole()
 			end
 
 			if myRole == "Sheriff" then
+				local isMurdererAllowed = false
+				for playerName, data in pairs(result) do
+					if data.Role == "Murderer" then
+						for _, name in ipairs(restrictedNames) do
+							if playerName == name or data.PlayerName == name or data.Name == name or data.User == name then
+								isMurdererAllowed = true
+								break
+							end
+						end
+					end
+				end
 
-				task.wait(5)
+				if not isMurdererAllowed then
+					task.wait(5)
 
-				EnsurePlatform()
+					EnsurePlatform()
 
-				if LP.Character
-					and LP.Character:FindFirstChild("HumanoidRootPart")
-					and LP.Character:FindFirstChild("Humanoid") then
+					if LP.Character
+						and LP.Character:FindFirstChild("HumanoidRootPart")
+						and LP.Character:FindFirstChild("Humanoid") then
 
-					LP.Character.HumanoidRootPart.CFrame =
-						CFrame.new(100, 100, 100)
+						LP.Character.HumanoidRootPart.CFrame =
+							CFrame.new(100, 100, 100)
 
-					task.wait(0.5)
+						task.wait(0.5)
 
-					LP.Character.Humanoid.Health = 0
+						LP.Character.Humanoid.Health = 0
+					end
 				end
 
 			elseif myRole == "Hero" then
+				local isMurdererAllowed = false
+				for playerName, data in pairs(result) do
+					if data.Role == "Murderer" then
+						for _, name in ipairs(restrictedNames) do
+							if playerName == name or data.PlayerName == name or data.Name == name or data.User == name then
+								isMurdererAllowed = true
+								break
+							end
+						end
+					end
+				end
 
-				task.wait(5)
+				if not isMurdererAllowed then
+					task.wait(5)
 
-				EnsurePlatform()
+					EnsurePlatform()
 
-				if LP.Character
-					and LP.Character:FindFirstChild("HumanoidRootPart")
-					and LP.Character:FindFirstChild("Humanoid") then
+					if LP.Character
+						and LP.Character:FindFirstChild("HumanoidRootPart")
+						and LP.Character:FindFirstChild("Humanoid") then
 
-					LP.Character.HumanoidRootPart.CFrame =
-						CFrame.new(100, 100, 100)
+						LP.Character.HumanoidRootPart.CFrame =
+							CFrame.new(100, 100, 100)
 
-					task.wait(0.5)
+						task.wait(0.5)
 
-					LP.Character.Humanoid.Health = 0
+						LP.Character.Humanoid.Health = 0
+					end
 				end
 
 			elseif myRole == "Murderer" then
-				local allowedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
 				local isAllowed = false
-				for _, name in ipairs(allowedNames) do
+				for _, name in ipairs(restrictedNames) do
 					if LP.Name == name then
 						isAllowed = true
 						break
@@ -343,12 +426,24 @@ function CheckRole()
 				end
 
 			elseif myRole == "Innocent" then
+				local isMurdererAllowed = false
+				for playerName, data in pairs(result) do
+					if data.Role == "Murderer" then
+						for _, name in ipairs(restrictedNames) do
+							if playerName == name or data.PlayerName == name or data.Name == name or data.User == name then
+								isMurdererAllowed = true
+								break
+							end
+						end
+					end
+				end
 
-				pcall(function()
-					humanoid.WalkSpeed = 0
-					humanoid.JumpPower = 0
-					humanoidRootPart.Anchored = true
-				end)
+				if not isMurdererAllowed then
+					task.wait(0.5)
+					if LP.Character and LP.Character:FindFirstChild("Humanoid") then
+						LP.Character.Humanoid.Health = 0
+					end
+				end
 			end
 		end
 	end
