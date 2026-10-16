@@ -32,12 +32,11 @@ end)
 local isMurderer = false
 local lastRoundIdentifier = nil
 
-local CHECK_DELAY = 1.0
+local CHECK_DELAY = 0.5
 local TELEPORT_DISTANCE = -2
 local RESET_DELAY = 0.2
 local RESPAWN_DELAY = 0
 local POST_MATCH_WAIT = 5
-local VOTE_DURATION = 10
 
 local priorityList = {
 	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
@@ -273,7 +272,7 @@ statusFrame.Size = UDim2.new(0, 240, 0, 42)
 statusFrame.Position = UDim2.new(0.5, -120, 0, 65)
 statusFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 statusFrame.BorderSizePixel = 0
-statusFrame.Parent = screenGuiStatus
+statusFrame.Parent = statusFrame
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 10)
@@ -401,7 +400,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- AUTO VOTE HELPERS & LOOP
+-- AUTO VOTE HELPERS & CONTINUOUS LOOP
 --------------------------------------------------------------------------------
 local function getCharacter()
 	local char = LP.Character
@@ -474,7 +473,6 @@ local function findAnyPriorityMap()
 end
 
 local function teleportToMap(targetPart)
-	-- Skip teleporting completely if you are the Murderer
 	if isMurderer then
 		updateStatus("Murderer active - TP disabled")
 		return false
@@ -514,7 +512,7 @@ local function teleportToMap(targetPart)
 	return success and err ~= false
 end
 
--- Main Voting Loop
+-- Endless Voting Loop until map loads in Workspace
 updateStatus("Scanning VotePads...")
 task.spawn(function()
 	while true do
@@ -522,47 +520,27 @@ task.spawn(function()
 			local activeMap = checkWorkspaceMap()
 			if activeMap then
 				updateStatus(activeMap .. " is running")
-				repeat task.wait(2) until not checkWorkspaceMap()
+				repeat task.wait(1) until not checkWorkspaceMap()
 			else
 				for i = POST_MATCH_WAIT, 1, -1 do
+					if checkWorkspaceMap() then break end
 					updateStatus("Waiting (" .. i .. ")")
 					task.wait(1)
 				end
-				local initialResult = nil
-				while not initialResult and not checkWorkspaceMap() do
-					initialResult = findAnyPriorityMap()
-					if not initialResult then
+
+				while not checkWorkspaceMap() do
+					local currentResult = findAnyPriorityMap()
+					if currentResult then
+						if isMurderer then
+							updateStatus("Murderer: Voting skipped")
+							task.wait(1)
+						else
+							updateStatus("Voting: " .. currentResult.name)
+							teleportToMap(currentResult.part)
+						end
+					else
 						updateStatus("Scanning VotePads...")
 						task.wait(CHECK_DELAY)
-					end
-				end
-				if not checkWorkspaceMap() and initialResult then
-					local lockedMapName = initialResult.name
-					updateStatus("Locked: " .. lockedMapName)
-					
-					local voteStartTime = tick()
-					while (tick() - voteStartTime < VOTE_DURATION) and not checkWorkspaceMap() do
-						local timeLeft = math.ceil(VOTE_DURATION - (tick() - voteStartTime))
-						local currentResult = findSpecificMap(lockedMapName)
-						if currentResult then
-							if isMurderer then
-								updateStatus("Murderer: Voting skipped")
-							else
-								updateStatus("Voting: " .. currentResult.name .. " (" .. timeLeft .. "s)")
-								local tpSuccess = teleportToMap(currentResult.part)
-								if not tpSuccess or checkWorkspaceMap() then break end
-							end
-						else
-							updateStatus("Searching: " .. lockedMapName .. " (" .. timeLeft .. "s)")
-						end
-						task.wait(CHECK_DELAY)
-					end
-					if not checkWorkspaceMap() then
-						updateStatus(lockedMapName .. " selected")
-						while not checkWorkspaceMap() do
-							updateStatus("Waiting for map to spawn")
-							task.wait(2)
-						end
 					end
 				end
 			end
