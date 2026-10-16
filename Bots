@@ -1,11 +1,19 @@
-if _G.BotScriptLoaded then
-	return
-end
+if _G.BotScriptLoaded then return end
 _G.BotScriptLoaded = true
 
 local Players = game:GetService("Players")
-local LP = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+local CoreGui = game:GetService("CoreGui")
 
+local LP = Players.LocalPlayer
+if not LP then return end
+
+-- Restricted Users List
 local restrictedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
 for _, name in ipairs(restrictedNames) do
 	if LP.Name == name then
@@ -13,19 +21,41 @@ for _, name in ipairs(restrictedNames) do
 	end
 end
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local Lighting = game:GetService("Lighting")
-local Workspace = game:GetService("Workspace")
-local TeleportService = game:GetService("TeleportService")
-local GuiService = game:GetService("GuiService")
-
+-- Cap FPS for performance
 pcall(function()
 	setfpscap(10)
 end)
 
+--------------------------------------------------------------------------------
+-- STATE & CONFIGURATION
+--------------------------------------------------------------------------------
+local isMurderer = false
 local lastRoundIdentifier = nil
 
+local CHECK_DELAY = 1.0
+local TELEPORT_DISTANCE = -2
+local RESET_DELAY = 0.2
+local RESPAWN_DELAY = 0
+local POST_MATCH_WAIT = 5
+local VOTE_DURATION = 10
+
+local priorityList = {
+	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
+	"Vampire's Castle", "Mansion 2", "WorkPlace", "Hotel 2", "Farm House", 
+	"Police Station", "Factory", "Bio Lab", "Research Facility", "Mil Base"
+}
+
+local allKnownMaps = {
+	"Bank2", "BioLab", "Factory", "Hospital3", "Hotel2", "House2", 
+	"Mansion2", "MilBase", "Office3", "PoliceStation", "ResearchFacility", 
+	"Workplace", "BeachResort", "Yacht", "Pier", "Manor", "Farmhouse", 
+	"Mineshaft", "BarnInfection", "VampiresCastle", "Spaceship", "Workshop", 
+	"LogCabin", "TrainStation", "IceCastle", "SkiLodge", "ChristmasInItaly", "SkiVillage"
+}
+
+--------------------------------------------------------------------------------
+-- LIGHTING & ENVIRONMENT OPTIMIZATION
+--------------------------------------------------------------------------------
 local function applyCleanSky()
 	Lighting.GlobalShadows = false
 	Lighting.FogEnd = 9e9
@@ -34,7 +64,7 @@ local function applyCleanSky()
 	Lighting.Ambient = Color3.fromRGB(128, 128, 128)
 	Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
- 
+	
 	local existingSky = Lighting:FindFirstChildOfClass("Sky")
 	if existingSky then
 		existingSky.SkyboxBk = "rbxassetid://99742693890881"
@@ -54,24 +84,21 @@ local function applyCleanSky()
 		sky.Parent = Lighting
 	end
 end
+pcall(applyCleanSky)
 
-pcall(function()
-	applyCleanSky()
-end)
-
+--------------------------------------------------------------------------------
+-- AUTO RECONNECT ON DISCONNECT / KICK
+--------------------------------------------------------------------------------
 task.spawn(function()
 	GuiService.ErrorMessageChanged:Connect(function()
 		task.wait(1)
-
 		pcall(function()
 			TeleportService:Teleport(game.PlaceId, LP)
 		end)
 	end)
-
 	Players.PlayerRemoving:Connect(function(player)
 		if player == LP then
 			task.wait(1)
-
 			pcall(function()
 				TeleportService:Teleport(game.PlaceId, LP)
 			end)
@@ -79,6 +106,9 @@ task.spawn(function()
 	end)
 end)
 
+--------------------------------------------------------------------------------
+-- NO COLLISION FOR OTHER PLAYERS
+--------------------------------------------------------------------------------
 RunService.Stepped:Connect(function()
 	pcall(function()
 		for _, player in ipairs(Players:GetPlayers()) do
@@ -93,9 +123,11 @@ RunService.Stepped:Connect(function()
 	end)
 end)
 
+--------------------------------------------------------------------------------
+-- MAP CLEANING & PLATFORM SETUP
+--------------------------------------------------------------------------------
 local function EnsurePlatform()
 	local plat = Workspace:FindFirstChild("MurdererPlatform")
-
 	if not plat then
 		plat = Instance.new("Part")
 		plat.Name = "MurdererPlatform"
@@ -112,93 +144,44 @@ local function EnsurePlatform()
 end
 
 local function ShouldDestroy(obj)
-	if not obj or not obj.Parent then
-		return false
-	end
-
-	if obj.Name == "Raggy" then
+	if not obj or not obj.Parent then return false end
+	if obj.Name == "Raggy" or obj:IsA("Sound") then return true end
+	if obj:IsA("Decal") and obj.Name:lower() == "face" then return true end
+	if obj.Name == "CoinContainer" or obj.Name == "WeaponDisplay" or obj.Name == "WeaponDisplays" or obj.Name == "WeaponsDisplay" then
 		return true
 	end
-
-	if obj:IsA("Sound") then
+	if obj:IsA("Accessory") or obj:IsA("Hat") or obj:IsA("SpecialMesh") or obj:IsA("MeshPart")
+		or obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke")
+		or obj:IsA("Sparkles") or obj:IsA("Beam") or obj:IsA("Explosion") or obj:IsA("Light")
+		or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") or obj:IsA("Texture")
+		or obj:IsA("Clothing") or obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") or obj:IsA("FaceControls") then
 		return true
 	end
-
-	if obj:IsA("Decal") and obj.Name:lower() == "face" then
-		return true
-	end
-
-	if obj.Name == "CoinContainer"
-		or obj.Name == "WeaponDisplay"
-		or obj.Name == "WeaponDisplays"
-		or obj.Name == "WeaponsDisplay" then
-		return true
-	end
-
-	if obj:IsA("Accessory")
-		or obj:IsA("Hat")
-		or obj:IsA("SpecialMesh")
-		or obj:IsA("MeshPart")
-		or obj:IsA("ParticleEmitter")
-		or obj:IsA("Trail")
-		or obj:IsA("Fire")
-		or obj:IsA("Smoke")
-		or obj:IsA("Sparkles")
-		or obj:IsA("Beam")
-		or obj:IsA("Explosion")
-		or obj:IsA("Light")
-		or obj:IsA("PointLight")
-		or obj:IsA("SpotLight")
-		or obj:IsA("SurfaceLight")
-		or obj:IsA("Texture")
-		or obj:IsA("Clothing")
-		or obj:IsA("Shirt")
-		or obj:IsA("Pants")
-		or obj:IsA("ShirtGraphic")
-		or obj:IsA("FaceControls") then
-		return true
-	end
-
 	return false
 end
 
 local function CleanCharacter(character)
-	if not character then
-		return
-	end
-
+	if not character then return end
 	for _, obj in ipairs(character:GetDescendants()) do
 		if ShouldDestroy(obj) then
-			pcall(function()
-				obj:Destroy()
-			end)
+			pcall(function() obj:Destroy() end)
 		end
 	end
 end
 
 local function CleanMap()
 	EnsurePlatform()
-
 	pcall(function()
 		local displays = Workspace:FindFirstChild("WeaponDisplays")
-		if displays then
-			displays:Destroy()
-		end
-
+		if displays then displays:Destroy() end
 		local weaponsDisplay = Workspace:FindFirstChild("WeaponsDisplay")
-		if weaponsDisplay then
-			weaponsDisplay:Destroy()
-		end
+		if weaponsDisplay then weaponsDisplay:Destroy() end
 	end)
-
 	for _, obj in ipairs(Workspace:GetDescendants()) do
 		if ShouldDestroy(obj) then
-			pcall(function()
-				obj:Destroy()
-			end)
+			pcall(function() obj:Destroy() end)
 		end
 	end
-
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player.Character then
 			CleanCharacter(player.Character)
@@ -209,59 +192,45 @@ end
 Workspace.DescendantAdded:Connect(function(obj)
 	task.defer(function()
 		if obj and obj.Parent and ShouldDestroy(obj) then
-			pcall(function()
-				obj:Destroy()
-			end)
+			pcall(function() obj:Destroy() end)
 		end
 	end)
 end)
 
 local function SetupCharacter(character)
-	if not character then
-		return
-	end
-
+	if not character then return end
 	task.spawn(function()
 		task.wait(0.1)
 		CleanCharacter(character)
 	end)
-
 	character.DescendantAdded:Connect(function(obj)
 		task.defer(function()
 			if obj and obj.Parent and ShouldDestroy(obj) then
-				pcall(function()
-					obj:Destroy()
-				end)
+				pcall(function() obj:Destroy() end)
 			end
 		end)
 	end)
 end
 
 for _, player in ipairs(Players:GetPlayers()) do
-	if player.Character then
-		SetupCharacter(player.Character)
-	end
-
-	player.CharacterAdded:Connect(function(character)
-		SetupCharacter(character)
-	end)
+	if player.Character then SetupCharacter(player.Character) end
+	player.CharacterAdded:Connect(SetupCharacter)
 end
-
-Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function(character)
-		SetupCharacter(character)
-	end)
+Players.PlayerAdded:Connect(function(p)
+	p.CharacterAdded:Connect(SetupCharacter)
 end)
 
 LP.CharacterAdded:Connect(function(char)
 	task.spawn(function()
 		task.wait(0.2)
-
 		CleanMap()
 		CleanCharacter(char)
 	end)
 end)
 
+--------------------------------------------------------------------------------
+-- DISPLAY NAME UI
+--------------------------------------------------------------------------------
 pcall(function()
 	local suffix = LP.Name:match("_(.+)$")
 	if suffix then
@@ -269,10 +238,10 @@ pcall(function()
 	end
 end)
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "DisplayNameGui"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = LP:WaitForChild("PlayerGui")
+local screenGuiName = Instance.new("ScreenGui")
+screenGuiName.Name = "DisplayNameGui"
+screenGuiName.ResetOnSpawn = false
+screenGuiName.Parent = LP:WaitForChild("PlayerGui")
 
 local textLabel = Instance.new("TextLabel")
 textLabel.Name = "NameLabel"
@@ -284,69 +253,89 @@ textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 textLabel.TextScaled = true
 textLabel.Font = Enum.Font.SourceSansBold
 textLabel.Text = LP.DisplayName
-textLabel.Parent = screenGui
+textLabel.Parent = screenGuiName
 
 LP:GetPropertyChangedSignal("DisplayName"):Connect(function()
 	textLabel.Text = LP.DisplayName
 end)
 
-function CheckRole()
-	local getPlayerData =
-		ReplicatedStorage:FindFirstChild("GetPlayerData", true)
+--------------------------------------------------------------------------------
+-- AUTO-MAP / VOTE STATUS UI
+--------------------------------------------------------------------------------
+local screenGuiStatus = Instance.new("ScreenGui")
+screenGuiStatus.Name = "AutoMapStatusGui"
+screenGuiStatus.ResetOnSpawn = false
+pcall(function() screenGuiStatus.Parent = CoreGui end)
+if not screenGuiStatus.Parent then screenGuiStatus.Parent = LP:WaitForChild("PlayerGui") end
 
-	if not getPlayerData then
-		return
-	end
+local statusFrame = Instance.new("Frame")
+statusFrame.Size = UDim2.new(0, 240, 0, 42)
+statusFrame.Position = UDim2.new(0.5, -120, 0, 65)
+statusFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+statusFrame.BorderSizePixel = 0
+statusFrame.Parent = screenGuiStatus
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = statusFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(60, 60, 60)
+stroke.Thickness = 1.5
+stroke.Parent = statusFrame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 1, 0)
+statusLabel.Position = UDim2.new(0, 10, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+statusLabel.TextSize = 13
+statusLabel.Font = Enum.Font.GothamMedium
+statusLabel.Text = "Status: Initializing..."
+statusLabel.Parent = statusFrame
+
+local function updateStatus(text)
+	statusLabel.Text = "Status: " .. text
+end
+
+--------------------------------------------------------------------------------
+-- ROLE CHECKER
+--------------------------------------------------------------------------------
+function CheckRole()
+	local getPlayerData = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
+	if not getPlayerData then return end
 
 	local success, result = pcall(function()
 		return getPlayerData:InvokeServer()
 	end)
-
-	if not success or not result then
-		return
-	end
+	if not success or not result then return end
 
 	local myRole = nil
 	local roundIdentifier = ""
 
 	for playerName, data in pairs(result) do
-		roundIdentifier =
-			roundIdentifier
-			.. playerName
-			.. (data.Role or "")
-
+		roundIdentifier = roundIdentifier .. playerName .. (data.Role or "")
 		if playerName == LP.Name then
 			myRole = data.Role
 		end
 	end
 
+	-- Update Murderer status for auto-voting restriction
+	isMurderer = (myRole == "Murderer")
+
 	if roundIdentifier ~= lastRoundIdentifier then
-
 		lastRoundIdentifier = roundIdentifier
-
 		CleanMap()
-
+		
 		if myRole then
-
 			task.wait(1)
-
-			local character =
-				LP.Character
-				or LP.CharacterAdded:Wait()
-
+			local character = LP.Character or LP.CharacterAdded:Wait()
 			CleanCharacter(character)
+			local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+			local humanoid = character:WaitForChild("Humanoid", 5)
+			if not humanoidRootPart or not humanoid then return end
 
-			local humanoidRootPart =
-				character:WaitForChild("HumanoidRootPart", 5)
-
-			local humanoid =
-				character:WaitForChild("Humanoid", 5)
-
-			if not humanoidRootPart or not humanoid then
-				return
-			end
-
-			if myRole == "Sheriff" then
+			if myRole == "Sheriff" or myRole == "Hero" then
 				local isMurdererAllowed = false
 				for playerName, data in pairs(result) do
 					if data.Role == "Murderer" then
@@ -358,52 +347,12 @@ function CheckRole()
 						end
 					end
 				end
-
 				if not isMurdererAllowed then
 					task.wait(5)
-
 					EnsurePlatform()
-
-					if LP.Character
-						and LP.Character:FindFirstChild("HumanoidRootPart")
-						and LP.Character:FindFirstChild("Humanoid") then
-
-						LP.Character.HumanoidRootPart.CFrame =
-							CFrame.new(100, 100, 100)
-
+					if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") and LP.Character:FindFirstChild("Humanoid") then
+						LP.Character.HumanoidRootPart.CFrame = CFrame.new(100, 100, 100)
 						task.wait(0.5)
-
-						LP.Character.Humanoid.Health = 0
-					end
-				end
-
-			elseif myRole == "Hero" then
-				local isMurdererAllowed = false
-				for playerName, data in pairs(result) do
-					if data.Role == "Murderer" then
-						for _, name in ipairs(restrictedNames) do
-							if playerName == name or data.PlayerName == name or data.Name == name or data.User == name then
-								isMurdererAllowed = true
-								break
-							end
-						end
-					end
-				end
-
-				if not isMurdererAllowed then
-					task.wait(5)
-
-					EnsurePlatform()
-
-					if LP.Character
-						and LP.Character:FindFirstChild("HumanoidRootPart")
-						and LP.Character:FindFirstChild("Humanoid") then
-
-						LP.Character.HumanoidRootPart.CFrame =
-							CFrame.new(100, 100, 100)
-
-						task.wait(0.5)
-
 						LP.Character.Humanoid.Health = 0
 					end
 				end
@@ -416,17 +365,11 @@ function CheckRole()
 						break
 					end
 				end
-
 				if not isAllowed then
 					task.wait(5)
-
 					EnsurePlatform()
-
-					if LP.Character
-						and LP.Character:FindFirstChild("HumanoidRootPart") then
-
-						LP.Character.HumanoidRootPart.CFrame =
-							CFrame.new(100, 100, 100)
+					if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
+						LP.Character.HumanoidRootPart.CFrame = CFrame.new(100, 100, 100)
 					end
 				end
 
@@ -442,7 +385,6 @@ function CheckRole()
 						end
 					end
 				end
-
 				if not isMurdererAllowed then
 					task.wait(0.5)
 					if LP.Character and LP.Character:FindFirstChild("Humanoid") then
@@ -455,7 +397,176 @@ function CheckRole()
 end
 
 RunService.RenderStepped:Connect(function()
-	pcall(function()
-		CheckRole()
+	pcall(CheckRole)
+end)
+
+--------------------------------------------------------------------------------
+-- AUTO VOTE HELPERS & LOOP
+--------------------------------------------------------------------------------
+local function getCharacter()
+	local char = LP.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then
+		char = LP.CharacterAdded:Wait()
+		char:WaitForChild("HumanoidRootPart", 5)
+		char:WaitForChild("Humanoid", 5)
+	end
+	return char
+end
+
+local function findDetectorPart(votePad)
+	for _, child in ipairs(votePad:GetDescendants()) do
+		if child:IsA("BasePart") and (child.Name:match("^Detector") or child.Name:match("Detector")) then
+			return child
+		end
+	end
+	if votePad:IsA("BasePart") then return votePad end
+	if votePad:IsA("Model") and votePad.PrimaryPart then return votePad.PrimaryPart end
+	return votePad:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function checkWorkspaceMap()
+	for _, mapName in ipairs(allKnownMaps) do
+		local formattedName = string.gsub(mapName, "%s+", "")
+		if Workspace:FindFirstChild(formattedName) then
+			return formattedName
+		end
+	end
+	return nil
+end
+
+local function findSpecificMap(targetMapName)
+	local regularLobby = Workspace:FindFirstChild("RegularLobby")
+	if not regularLobby then return nil end
+	
+	local searchFolders = { regularLobby }
+	local voteIcons = regularLobby:FindFirstChild("VoteIcons")
+	if voteIcons then table.insert(searchFolders, voteIcons) end
+	
+	for _, folder in ipairs(searchFolders) do
+		for _, votePad in ipairs(folder:GetChildren()) do
+			if votePad.Name:match("^VotePad") then
+				local voteInfoGui = votePad:FindFirstChild("VoteInfoGui")
+				local container = voteInfoGui and voteInfoGui:FindFirstChild("Container")
+				local mapNameObj = container and container:FindFirstChild("MapName")
+				if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
+					local text = tostring(mapNameObj.Text)
+					if text ~= "" then
+						if string.find(string.lower(text), string.lower(targetMapName), 1, true) then
+							local detectorPart = findDetectorPart(votePad)
+							if detectorPart then
+								return { name = targetMapName, text = text, part = detectorPart }
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+local function findAnyPriorityMap()
+	for _, mapName in ipairs(priorityList) do
+		local result = findSpecificMap(mapName)
+		if result then return result end
+	end
+	return nil
+end
+
+local function teleportToMap(targetPart)
+	-- Skip teleporting completely if you are the Murderer
+	if isMurderer then
+		updateStatus("Murderer active - TP disabled")
+		return false
+	end
+
+	local success, err = pcall(function()
+		local character = getCharacter()
+		if not character then return false end
+		
+		local root = character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not root or not humanoid or humanoid.Health <= 0 then return false end
+		if checkWorkspaceMap() then return false end
+		
+		local targetPos = targetPart.Position + Vector3.new(0, TELEPORT_DISTANCE, 0)
+		root.CFrame = CFrame.new(targetPos)
+		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		
+		if RESET_DELAY > 0 then task.wait(RESET_DELAY) end
+		if checkWorkspaceMap() then return false end
+		
+		if humanoid and humanoid.Health > 0 then humanoid.Health = 0 end
+		if RESPAWN_DELAY > 0 then task.wait(RESPAWN_DELAY) end
+		
+		local startTime = tick()
+		repeat
+			task.wait(0.2)
+			local newChar = LP.Character
+			if newChar and newChar:FindFirstChild("HumanoidRootPart") and newChar:FindFirstChildOfClass("Humanoid") and newChar.Humanoid.Health > 0 then
+				break
+			end
+		until tick() - startTime > 5
+		
+		return true
 	end)
+	return success and err ~= false
+end
+
+-- Main Voting Loop
+updateStatus("Scanning VotePads...")
+task.spawn(function()
+	while true do
+		pcall(function()
+			local activeMap = checkWorkspaceMap()
+			if activeMap then
+				updateStatus(activeMap .. " is running")
+				repeat task.wait(2) until not checkWorkspaceMap()
+			else
+				for i = POST_MATCH_WAIT, 1, -1 do
+					updateStatus("Waiting (" .. i .. ")")
+					task.wait(1)
+				end
+				local initialResult = nil
+				while not initialResult and not checkWorkspaceMap() do
+					initialResult = findAnyPriorityMap()
+					if not initialResult then
+						updateStatus("Scanning VotePads...")
+						task.wait(CHECK_DELAY)
+					end
+				end
+				if not checkWorkspaceMap() and initialResult then
+					local lockedMapName = initialResult.name
+					updateStatus("Locked: " .. lockedMapName)
+					
+					local voteStartTime = tick()
+					while (tick() - voteStartTime < VOTE_DURATION) and not checkWorkspaceMap() do
+						local timeLeft = math.ceil(VOTE_DURATION - (tick() - voteStartTime))
+						local currentResult = findSpecificMap(lockedMapName)
+						if currentResult then
+							if isMurderer then
+								updateStatus("Murderer: Voting skipped")
+							else
+								updateStatus("Voting: " .. currentResult.name .. " (" .. timeLeft .. "s)")
+								local tpSuccess = teleportToMap(currentResult.part)
+								if not tpSuccess or checkWorkspaceMap() then break end
+							end
+						else
+							updateStatus("Searching: " .. lockedMapName .. " (" .. timeLeft .. "s)")
+						end
+						task.wait(CHECK_DELAY)
+					end
+					if not checkWorkspaceMap() then
+						updateStatus(lockedMapName .. " selected")
+						while not checkWorkspaceMap() do
+							updateStatus("Waiting for map to spawn")
+							task.wait(2)
+						end
+					end
+				end
+			end
+		end)
+		task.wait(0.5)
+	end
 end)
