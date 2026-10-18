@@ -1,4 +1,4 @@
-if _G.BotScriptLoaded then return end
+If _G.BotScriptLoaded then return end
 _G.BotScriptLoaded = true
 
 local Players = game:GetService("Players")
@@ -15,10 +15,19 @@ if not LP then return end
 
 -- Restricted Users List
 local restrictedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
-for _, name in ipairs(restrictedNames) do
-	if LP.Name == name then
-		return
+
+local function isRestrictedUser(playerName)
+	for _, name in ipairs(restrictedNames) do
+		if playerName == name then
+			return true
+		end
 	end
+	return false
+end
+
+-- Stop execution if LocalPlayer is in restricted list upon loading (if intended, otherwise skip)
+if isRestrictedUser(LP.Name) then
+	return
 end
 
 -- Cap FPS for performance
@@ -140,6 +149,7 @@ local function EnsurePlatform()
 		plat.BrickColor = BrickColor.new("Medium stone grey")
 		plat.Transparency = 0.9
 	end
+	return plat
 end
 
 local function ShouldDestroy(obj)
@@ -272,7 +282,7 @@ statusFrame.Size = UDim2.new(0, 240, 0, 42)
 statusFrame.Position = UDim2.new(0.5, -120, 0, 65)
 statusFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 statusFrame.BorderSizePixel = 0
-statusFrame.Parent = statusFrame
+statusFrame.Parent = screenGuiStatus
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 10)
@@ -298,7 +308,7 @@ local function updateStatus(text)
 end
 
 --------------------------------------------------------------------------------
--- ROLE CHECKER
+-- ROLE CHECKER & REACTION LOGIC
 --------------------------------------------------------------------------------
 function CheckRole()
 	local getPlayerData = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
@@ -319,7 +329,7 @@ function CheckRole()
 		end
 	end
 
-	-- Update Murderer status for auto-voting restriction
+	-- Update Murderer status for voting
 	isMurderer = (myRole == "Murderer")
 
 	if roundIdentifier ~= lastRoundIdentifier then
@@ -327,68 +337,32 @@ function CheckRole()
 		CleanMap()
 		
 		if myRole then
-			task.wait(1)
+			task.wait(0.2)
 			local character = LP.Character or LP.CharacterAdded:Wait()
 			CleanCharacter(character)
-			local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+			local root = character:WaitForChild("HumanoidRootPart", 5)
 			local humanoid = character:WaitForChild("Humanoid", 5)
-			if not humanoidRootPart or not humanoid then return end
+			if not root or not humanoid then return end
 
-			if myRole == "Sheriff" or myRole == "Hero" then
-				local isMurdererAllowed = false
-				for playerName, data in pairs(result) do
-					if data.Role == "Murderer" then
-						for _, name in ipairs(restrictedNames) do
-							if playerName == name or data.PlayerName == name or data.Name == name or data.User == name then
-								isMurdererAllowed = true
-								break
-							end
-						end
-					end
-				end
-				if not isMurdererAllowed then
-					task.wait(5)
-					EnsurePlatform()
-					if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") and LP.Character:FindFirstChild("Humanoid") then
-						LP.Character.HumanoidRootPart.CFrame = CFrame.new(100, 100, 100)
-						task.wait(0.5)
-						LP.Character.Humanoid.Health = 0
-					end
-				end
+			if myRole == "Innocent" then
+				-- Instantly reset if Innocent
+				humanoid.Health = 0
+
+			elseif myRole == "Sheriff" or myRole == "Hero" then
+				-- Teleport to Platform, then instantly reset
+				EnsurePlatform()
+				root.CFrame = CFrame.new(100, 100, 100)
+				task.wait(0.1)
+				humanoid.Health = 0
 
 			elseif myRole == "Murderer" then
-				local isAllowed = false
-				for _, name in ipairs(restrictedNames) do
-					if LP.Name == name then
-						isAllowed = true
-						break
-					end
-				end
-				if not isAllowed then
-					task.wait(5)
+				if isRestrictedUser(LP.Name) then
+					-- Stay in current position and do not reset
+					return
+				else
+					-- Non-restricted Murderer: Teleport to Platform
 					EnsurePlatform()
-					if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
-						LP.Character.HumanoidRootPart.CFrame = CFrame.new(100, 100, 100)
-					end
-				end
-
-			elseif myRole == "Innocent" then
-				local isMurdererAllowed = false
-				for playerName, data in pairs(result) do
-					if data.Role == "Murderer" then
-						for _, name in ipairs(restrictedNames) do
-							if playerName == name or data.PlayerName == name or data.Name == name or data.User == name then
-								isMurdererAllowed = true
-								break
-							end
-						end
-					end
-				end
-				if not isMurdererAllowed then
-					task.wait(0.5)
-					if LP.Character and LP.Character:FindFirstChild("Humanoid") then
-						LP.Character.Humanoid.Health = 0
-					end
+					root.CFrame = CFrame.new(100, 100, 100)
 				end
 			end
 		end
