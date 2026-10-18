@@ -270,15 +270,11 @@ function CheckRole()
 
 	local myRole = nil
 	local roundIdentifier = ""
-	local murdererPlayerName = nil
 
 	for playerName, data in pairs(result) do
 		roundIdentifier = roundIdentifier .. playerName .. (data.Role or "")
 		if playerName == LP.Name then
 			myRole = data.Role
-		end
-		if data.Role == "Murderer" then
-			murdererPlayerName = playerName
 		end
 	end
 
@@ -294,23 +290,30 @@ function CheckRole()
 			local humanoid = character:WaitForChild("Humanoid", 5)
 			if not root or not humanoid then return end
 
+			local isRestricted = isRestrictedUser(LP.Name)
+
 			if myRole == "Innocent" then
 				-- Instantly reset if Innocent
 				humanoid.Health = 0
 
 			elseif myRole == "Sheriff" or myRole == "Hero" then
-				-- Teleport to Platform, then instantly reset
-				EnsurePlatform()
-				root.CFrame = CFrame.new(100, 100, 100)
-				task.wait(0.1)
-				humanoid.Health = 0
-
-			elseif myRole == "Murderer" then
-				-- If the Murderer is one of the restricted users, stay in place and don't reset
-				if murdererPlayerName and isRestrictedUser(murdererPlayerName) then
+				if isRestricted then
+					-- Restricted Sheriff/Hero: Do NOT reset, remain in position
 					return
 				else
-					-- Otherwise teleport to Platform and stay alive
+					-- Non-restricted Sheriff/Hero: Teleport to Platform and reset
+					EnsurePlatform()
+					root.CFrame = CFrame.new(100, 100, 100)
+					task.wait(0.1)
+					humanoid.Health = 0
+				end
+
+			elseif myRole == "Murderer" then
+				if isRestricted then
+					-- Restricted Murderer: Do NOT reset, remain in position
+					return
+				else
+					-- Non-restricted Murderer: Teleport to Platform
 					EnsurePlatform()
 					root.CFrame = CFrame.new(100, 100, 100)
 				end
