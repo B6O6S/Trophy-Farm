@@ -331,19 +331,8 @@ function CheckRole()
 					end
 
 				elseif myRole == "Murderer" then
-					if isRestricted then
-						-- Restricted Murderer: Do NOT reset, remain in position
-						return
-					else
-						-- Non-restricted Murderer: Teleport to Platform and stay (no reset)
-						EnsurePlatform()
-						local character = LP.Character or LP.CharacterAdded:Wait()
-						CleanCharacter(character)
-						local root = character:WaitForChild("HumanoidRootPart", 5)
-						if root then
-							root.CFrame = CFrame.new(100, 100, 100)
-						end
-					end
+					-- Murderer never teleports and never resets (regardless of user list)
+					return
 				end
 			end)
 		end
