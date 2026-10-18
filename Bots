@@ -297,28 +297,15 @@ function CheckRole()
 				local isRestricted = isRestrictedUser(LP.Name)
 
 				if myRole == "Innocent" then
-					-- Check role continuously for 10 seconds before resetting
-					local startTime = tick()
-					while tick() - startTime < 10 do
-						task.wait(0.5)
-						local currentRole = getCurrentRole()
-						if currentRole ~= "Innocent" then return end -- Stop if role changed
-					end
-
-					local character = LP.Character
-					if character then
-						local humanoid = character:FindFirstChildOfClass("Humanoid")
-						if humanoid then
-							humanoid.Health = 0
-						end
-					end
+					-- Innocents never reset
+					return
 
 				elseif myRole == "Sheriff" or myRole == "Hero" then
 					if isRestricted then
 						-- Restricted Sheriff/Hero: Do NOT reset, remain in position
 						return
 					else
-						-- Teleport to Platform immediately
+						-- Non-restricted Sheriff/Hero: Teleport to Platform immediately
 						EnsurePlatform()
 						local character = LP.Character or LP.CharacterAdded:Wait()
 						CleanCharacter(character)
@@ -348,7 +335,7 @@ function CheckRole()
 						-- Restricted Murderer: Do NOT reset, remain in position
 						return
 					else
-						-- Non-restricted Murderer: Teleport to Platform and stay
+						-- Non-restricted Murderer: Teleport to Platform and stay (no reset)
 						EnsurePlatform()
 						local character = LP.Character or LP.CharacterAdded:Wait()
 						CleanCharacter(character)
