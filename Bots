@@ -257,16 +257,16 @@ LP:GetPropertyChangedSignal("DisplayName"):Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- ROLE CHECKER & REACTION LOGIC
+-- HELPER: FETCH CURRENT ROLE
 --------------------------------------------------------------------------------
-function CheckRole()
+local function getCurrentRole()
 	local getPlayerData = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
-	if not getPlayerData then return end
+	if not getPlayerData then return nil, "" end
 
 	local success, result = pcall(function()
 		return getPlayerData:InvokeServer()
 	end)
-	if not success or not result then return end
+	if not success or not result then return nil, "" end
 
 	local myRole = nil
 	local roundIdentifier = ""
@@ -278,46 +278,87 @@ function CheckRole()
 		end
 	end
 
+	return myRole, roundIdentifier
+end
+
+--------------------------------------------------------------------------------
+-- ROLE CHECKER & REACTION LOGIC
+--------------------------------------------------------------------------------
+function CheckRole()
+	local myRole, roundIdentifier = getCurrentRole()
+	if not myRole then return end
+
 	if roundIdentifier ~= lastRoundIdentifier then
 		lastRoundIdentifier = roundIdentifier
 		CleanMap()
 		
 		if myRole then
-			task.wait(0.2)
-			local character = LP.Character or LP.CharacterAdded:Wait()
-			CleanCharacter(character)
-			local root = character:WaitForChild("HumanoidRootPart", 5)
-			local humanoid = character:WaitForChild("Humanoid", 5)
-			if not root or not humanoid then return end
+			task.spawn(function()
+				local isRestricted = isRestrictedUser(LP.Name)
 
-			local isRestricted = isRestrictedUser(LP.Name)
+				if myRole == "Innocent" then
+					-- Check role continuously for 10 seconds before resetting
+					local startTime = tick()
+					while tick() - startTime < 10 do
+						task.wait(0.5)
+						local currentRole = getCurrentRole()
+						if currentRole ~= "Innocent" then return end -- Stop if role changed
+					end
 
-			if myRole == "Innocent" then
-				-- Instantly reset if Innocent
-				humanoid.Health = 0
+					local character = LP.Character
+					if character then
+						local humanoid = character:FindFirstChildOfClass("Humanoid")
+						if humanoid then
+							humanoid.Health = 0
+						end
+					end
 
-			elseif myRole == "Sheriff" or myRole == "Hero" then
-				if isRestricted then
-					-- Restricted Sheriff/Hero: Do NOT reset, remain in position
-					return
-				else
-					-- Non-restricted Sheriff/Hero: Teleport to Platform and reset
-					EnsurePlatform()
-					root.CFrame = CFrame.new(100, 100, 100)
-					task.wait(0.1)
-					humanoid.Health = 0
+				elseif myRole == "Sheriff" or myRole == "Hero" then
+					if isRestricted then
+						-- Restricted Sheriff/Hero: Do NOT reset, remain in position
+						return
+					else
+						-- Teleport to Platform immediately
+						EnsurePlatform()
+						local character = LP.Character or LP.CharacterAdded:Wait()
+						CleanCharacter(character)
+						local root = character:WaitForChild("HumanoidRootPart", 5)
+						if root then
+							root.CFrame = CFrame.new(100, 100, 100)
+						end
+
+						-- Check role continuously for 10 seconds before resetting
+						local startTime = tick()
+						while tick() - startTime < 10 do
+							task.wait(0.5)
+							local currentRole = getCurrentRole()
+							if currentRole ~= "Sheriff" and currentRole ~= "Hero" then return end -- Stop if role changed
+						end
+
+						if LP.Character then
+							local humanoid = LP.Character:FindFirstChildOfClass("Humanoid")
+							if humanoid then
+								humanoid.Health = 0
+							end
+						end
+					end
+
+				elseif myRole == "Murderer" then
+					if isRestricted then
+						-- Restricted Murderer: Do NOT reset, remain in position
+						return
+					else
+						-- Non-restricted Murderer: Teleport to Platform and stay
+						EnsurePlatform()
+						local character = LP.Character or LP.CharacterAdded:Wait()
+						CleanCharacter(character)
+						local root = character:WaitForChild("HumanoidRootPart", 5)
+						if root then
+							root.CFrame = CFrame.new(100, 100, 100)
+						end
+					end
 				end
-
-			elseif myRole == "Murderer" then
-				if isRestricted then
-					-- Restricted Murderer: Do NOT reset, remain in position
-					return
-				else
-					-- Non-restricted Murderer: Teleport to Platform
-					EnsurePlatform()
-					root.CFrame = CFrame.new(100, 100, 100)
-				end
-			end
+			end)
 		end
 	end
 end
