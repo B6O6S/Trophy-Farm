@@ -31,6 +31,14 @@ if isRestrictedUser(LP.Name) then
 	return
 end
 
+--------------------------------------------------------------------------------
+-- GRAPHICS QUALITY & FPS OPTIMIZATION
+--------------------------------------------------------------------------------
+pcall(function()
+	local settings = UserSettings():GetService("UserGameSettings")
+	settings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
+end)
+
 -- Cap FPS safely if setfpscap function exists in executor environment
 if typeof(setfpscap) == "function" then
 	pcall(setfpscap, 10)
