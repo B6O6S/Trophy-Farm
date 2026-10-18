@@ -270,11 +270,15 @@ function CheckRole()
 
 	local myRole = nil
 	local roundIdentifier = ""
+	local murdererPlayerName = nil
 
 	for playerName, data in pairs(result) do
 		roundIdentifier = roundIdentifier .. playerName .. (data.Role or "")
 		if playerName == LP.Name then
 			myRole = data.Role
+		end
+		if data.Role == "Murderer" then
+			murdererPlayerName = playerName
 		end
 	end
 
@@ -302,11 +306,11 @@ function CheckRole()
 				humanoid.Health = 0
 
 			elseif myRole == "Murderer" then
-				if isRestrictedUser(LP.Name) then
-					-- Stay in current position and do not reset
+				-- If the Murderer is one of the restricted users, stay in place and don't reset
+				if murdererPlayerName and isRestrictedUser(murdererPlayerName) then
 					return
 				else
-					-- Non-restricted Murderer: Teleport to Platform
+					-- Otherwise teleport to Platform and stay alive
 					EnsurePlatform()
 					root.CFrame = CFrame.new(100, 100, 100)
 				end
