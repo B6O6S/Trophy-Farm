@@ -8,7 +8,6 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 if not player then return end
 
--- Anti-double run check
 local existingGui = CoreGui:FindFirstChild("AutoMapStatusGui") or player.PlayerGui:FindFirstChild("AutoMapStatusGui")
 if existingGui then
 	print("[AutoMap] The script is already running!")
@@ -22,7 +21,6 @@ if existingGui then
 	return
 end
 
--- Performance & Lighting Optimizations
 pcall(function() setfpscap(30) end)
 
 pcall(function()
@@ -65,7 +63,6 @@ Workspace.ChildAdded:Connect(function(child)
 	end
 end)
 
--- Force specific parts to be CanCollide = true
 RunService.Stepped:Connect(function()
 	pcall(function()
 		for _, descendant in ipairs(Workspace:GetDescendants()) do
@@ -78,7 +75,6 @@ RunService.Stepped:Connect(function()
 	end)
 end)
 
--- Object Hiding / Visual Cleaners
 local function HideObject(obj)
 	if not obj or not obj.Parent then return end
 
@@ -168,14 +164,12 @@ Players.PlayerAdded:Connect(function(p)
 	p.CharacterAdded:Connect(function(c) SetupCharacter(p, c) end)
 end)
 
-----------------------------------------------------
--- AUTO MAP VOTER CONFIG & LOGIC
-----------------------------------------------------
 local CHECK_DELAY = 0.5
 local TELEPORT_DISTANCE = -2 
 local RESET_DELAY = 0.2 
-local POST_MATCH_WAIT = 5
-local VOTE_DURATION = 12 
+local RESPAWN_DELAY = 0
+local POST_MATCH_WAIT = 10
+local VOTE_DURATION = 10 
 
 local priorityList = {
 	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
@@ -191,7 +185,6 @@ local allKnownMaps = {
 	"LogCabin", "TrainStation", "IceCastle", "SkiLodge", "ChristmasInItaly", "SkiVillage"
 }
 
--- Compact Status UI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AutoMapStatusGui"
 screenGui.ResetOnSpawn = false
@@ -238,22 +231,6 @@ local function getCharacter()
 	return char
 end
 
-local function checkWorkspaceMap()
-	-- Check generic MM2 round containers
-	if Workspace:FindFirstChild("Normal") or Workspace:FindFirstChild("Map") then
-		return "Active Game"
-	end
-
-	-- Check specific named map models
-	for _, mapName in ipairs(allKnownMaps) do
-		local formattedName = string.gsub(mapName, "%s+", "")
-		if Workspace:FindFirstChild(formattedName) then
-			return formattedName
-		end
-	end
-	return nil
-end
-
 local function findDetectorPart(votePad)
 	for _, child in ipairs(votePad:GetDescendants()) do
 		if child:IsA("BasePart") and (child.Name:match("^Detector") or child.Name:match("Detector")) then
@@ -263,6 +240,16 @@ local function findDetectorPart(votePad)
 	if votePad:IsA("BasePart") then return votePad end
 	if votePad:IsA("Model") and votePad.PrimaryPart then return votePad.PrimaryPart end
 	return votePad:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function checkWorkspaceMap()
+	for _, mapName in ipairs(allKnownMaps) do
+		local formattedName = string.gsub(mapName, "%s+", "")
+		if Workspace:FindFirstChild(formattedName) then
+			return formattedName
+		end
+	end
+	return nil
 end
 
 local function isMatchingMap(uiText, targetMapName)
@@ -292,10 +279,12 @@ local function findSpecificMap(targetMapName)
 
 			if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
 				local text = tostring(mapNameObj.Text)
-				if text ~= "" and isMatchingMap(text, targetMapName) then
-					local detectorPart = findDetectorPart(votePad)
-					if detectorPart then
-						return { name = targetMapName, text = text, part = detectorPart }
+				if text ~= "" then
+					if isMatchingMap(text, targetMapName) then
+						local detectorPart = findDetectorPart(votePad)
+						if detectorPart then
+							return { name = targetMapName, text = text, part = detectorPart }
+						end
 					end
 				end
 			end
@@ -312,99 +301,93 @@ local function findAnyPriorityMap()
 	return nil
 end
 
-local function castVote(targetPart)
-	if checkWorkspaceMap() then return false end
-	
-	local character = getCharacter()
-	if not character then return false end
-	
-	local root = character:FindFirstChild("HumanoidRootPart")
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not root or not humanoid or humanoid.Health <= 0 then return false end
+local function teleportToMap(targetPart)
+	local success, err = pcall(function()
+		local character = getCharacter()
+		if not character then return false end
+		
+		local root = character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not root or not humanoid or humanoid.Health <= 0 then return false end
+		if checkWorkspaceMap() then return false end
 
-	local targetPos = targetPart.Position + Vector3.new(0, TELEPORT_DISTANCE, 0)
+		local targetPos = targetPart.Position + Vector3.new(0, TELEPORT_DISTANCE, 0)
 
-	-- Teleport onto the voting pad
-	root.CFrame = CFrame.new(targetPos)
-	root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-	root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		root.CFrame = CFrame.new(targetPos)
+		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 
-	if RESET_DELAY > 0 then task.wait(RESET_DELAY) end
-	if checkWorkspaceMap() then return false end
-
-	-- Reset character to complete vote & return to lobby
-	if humanoid and humanoid.Health > 0 then 
-		humanoid.Health = 0 
-	end
-
-	-- Wait for respawn safely
-	local startTime = tick()
-	repeat
-		task.wait(0.1)
-		local newChar = player.Character
-		if newChar and newChar:FindFirstChild("HumanoidRootPart") and newChar:FindFirstChildOfClass("Humanoid") and newChar.Humanoid.Health > 0 then
-			break
-		end
-	until tick() - startTime > 4
-	
-	return true
+		if RESET_DELAY > 0 then task.wait(RESET_DELAY) end
+		if checkWorkspaceMap() then return false end
+		if humanoid and humanoid.Health > 0 then humanoid.Health = 0 end
+		if RESPAWN_DELAY > 0 then task.wait(RESPAWN_DELAY) end
+		
+		local startTime = tick()
+		repeat
+			task.wait(0.1)
+			local newChar = player.Character
+			if newChar and newChar:FindFirstChild("HumanoidRootPart") and newChar:FindFirstChildOfClass("Humanoid") and newChar.Humanoid.Health > 0 then
+				break
+			end
+		until tick() - startTime > 5
+		
+		return true
+	end)
+	return success and err ~= false
 end
 
--- Main Voting Loop
 updateStatus("Scanning...")
 
 task.spawn(function()
 	while true do
 		pcall(function()
 			local activeMap = checkWorkspaceMap()
-			
 			if activeMap then
-				updateStatus("In Match: " .. activeMap)
+				updateStatus(activeMap)
 				repeat task.wait(1) until not checkWorkspaceMap()
 			else
-				-- Waiting period right after a game ends
 				for i = POST_MATCH_WAIT, 1, -1 do
-					if checkWorkspaceMap() then break end
 					updateStatus("Waiting (" .. i .. "s)")
 					task.wait(1)
 				end
 
-				-- Scan for priority map pads
-				local priorityMap = nil
-				while not priorityMap and not checkWorkspaceMap() do
-					priorityMap = findAnyPriorityMap()
-					if not priorityMap then
-						updateStatus("Scanning Pads...")
+				local initialResult = nil
+				while not initialResult and not checkWorkspaceMap() do
+					initialResult = findAnyPriorityMap()
+					if not initialResult then
+						updateStatus("Scanning...")
 						task.wait(CHECK_DELAY)
 					end
 				end
 
-				-- Perform voting if map pad is found and map hasn't loaded yet
-				if not checkWorkspaceMap() and priorityMap then
-					local targetName = priorityMap.name
-					updateStatus("Found: " .. targetName)
+				if not checkWorkspaceMap() and initialResult then
+					local lockedMapName = initialResult.name
+					updateStatus("Locked: " .. lockedMapName)
 					
-					local hasVoted = false
 					local voteStartTime = tick()
-					
-					while (tick() - voteStartTime < VOTE_DURATION) and not checkWorkspaceMap() and not hasVoted do
-						local padData = findSpecificMap(targetName)
-						if padData then
-							updateStatus("Voting: " .. padData.name)
-							hasVoted = castVote(padData.part)
+					while (tick() - voteStartTime < VOTE_DURATION) and not checkWorkspaceMap() do
+						local timeLeft = math.ceil(VOTE_DURATION - (tick() - voteStartTime))
+						local currentResult = findSpecificMap(lockedMapName)
+						if currentResult then
+							updateStatus(currentResult.name .. " (" .. timeLeft .. "s)")
+							local tpSuccess = teleportToMap(currentResult.part)
+							if not tpSuccess or checkWorkspaceMap() then break end
+						else
+							updateStatus("Finding (" .. timeLeft .. "s)")
 						end
 						task.wait(CHECK_DELAY)
 					end
 
-					if hasVoted and not checkWorkspaceMap() then
-						updateStatus("Voted! Waiting...")
+					if not checkWorkspaceMap() then
+						updateStatus("Selected!")
 						while not checkWorkspaceMap() do
-							task.wait(0.5)
+							updateStatus("Spawning...")
+							task.wait(1)
 						end
 					end
 				end
 			end
 		end)
-		task.wait(0.2)
+		task.wait(0.1)
 	end
 end)
