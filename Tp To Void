@@ -1,0 +1,59 @@
+-- Services
+local Players = game:GetService("Players")
+
+-- Configuration Constants
+local TARGET_POSITION = Vector3.new(500, 103, 500) -- Slightly above 100 to prevent ground-glitching
+local VOID_Y_THRESHOLD = -50 -- Height at which a player is considered falling into the void
+
+-- Function to safely teleport a player to coordinates
+local function safeTeleport(character, position)
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		-- Clear existing velocity so momentum doesn't carry them through the platform
+		rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		
+		-- Teleport to the destination
+		rootPart.CFrame = CFrame.new(position)
+	end
+end
+
+-- Function to monitor character events (Equipping tools & Void checking)
+local function onCharacterAdded(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	local rootPart = character:WaitForChild("HumanoidRootPart")
+
+	-- 1. Check when a tool is equipped
+	character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == "Gun" then
+			safeTeleport(character, TARGET_POSITION)
+		end
+	end)
+
+	-- Also handle if the tool is already in the character's hands or re-equipped
+	humanoid.Seated:Connect(function() end) -- Placeholder to keep connection hooks active if needed
+	
+	-- 2. Monitor for falling into the void continuously
+	task.spawn(function()
+		while character and character.Parent do
+			if rootPart.Position.Y < VOID_Y_THRESHOLD then
+				safeTeleport(character, TARGET_POSITION)
+				-- Brief wait to prevent rapid re-triggering if lagging
+				task.wait(1)
+			end
+			task.wait(0.5) -- Check twice a second for performance efficiency
+		end
+	end)
+end
+
+-- Connect to existing and future players joining the game
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(onCharacterAdded)
+	
+	-- If character already exists when script loads
+	if player.Character then
+		task.spawn(function()
+			onCharacterAdded(player.Character)
+		end)
+	end
+end)
