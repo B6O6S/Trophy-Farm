@@ -319,7 +319,7 @@ function CheckRole()
 						-- Do NOT reset if local player is restricted OR if the Murderer is a restricted user
 						return
 					else
-						-- Non-restricted Sheriff/Hero & Murderer is not restricted: Teleport and instantly reset
+						-- Non-restricted Sheriff/Hero & Murderer is not restricted: Teleport to platform, wait 5s, then reset
 						EnsurePlatform()
 						local character = LP.Character or LP.CharacterAdded:Wait()
 						CleanCharacter(character)
@@ -329,6 +329,10 @@ function CheckRole()
 						if root then
 							root.CFrame = CFrame.new(100, 100, 100)
 						end
+
+						-- Wait 5 seconds before resetting
+						task.wait(5)
+						
 						if humanoid then
 							humanoid.Health = 0
 						end
