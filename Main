@@ -63,6 +63,19 @@ Workspace.ChildAdded:Connect(function(child)
 	end
 end)
 
+-- Force specific parts to be CanCollide = true
+RunService.Stepped:Connect(function()
+	pcall(function()
+		for _, descendant in ipairs(Workspace:GetDescendants()) do
+			if descendant.Name == "safevoidpath_- am gonna kill you" and descendant:IsA("BasePart") then
+				if not descendant.CanCollide then
+					descendant.CanCollide = true
+				end
+			end
+		end
+	end)
+end)
+
 local function HideObject(obj)
 	if not obj or not obj.Parent then return end
 
@@ -245,7 +258,6 @@ local function isMatchingMap(uiText, targetMapName)
 	local cleanUI = string.lower(string.gsub(uiText, "%s+", ""))
 	local cleanTarget = string.lower(string.gsub(targetMapName, "%s+", ""))
 	
-	-- Handle specific overlap issue (e.g., "House 2" vs "Haunted House 2")
 	if cleanTarget == "house2" then
 		return cleanUI == "house2"
 	end
