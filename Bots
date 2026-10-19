@@ -1,7 +1,31 @@
--- Prevent double execution across global environments
-if getgenv().BotScriptExecuted or _G.BotScriptLoaded then return end
+-- Prevent double execution across global environments unless refreshing
+if not _G.ForceScriptRefresh then
+	if getgenv().BotScriptExecuted or _G.BotScriptLoaded then return end
+end
 getgenv().BotScriptExecuted = true
 _G.BotScriptLoaded = true
+_G.ForceScriptRefresh = nil
+
+--------------------------------------------------------------------------------
+-- AUTO-UPDATE / REFRESH FROM GITHUB
+--------------------------------------------------------------------------------
+local GITHUB_RAW_URL = "YOUR_RAW_GITHUB_URL_HERE" -- Replace with your actual GitHub raw script URL
+
+task.spawn(function()
+	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "YOUR_RAW_GITHUB_URL_HERE" then
+		local success, result = pcall(function()
+			return game:HttpGet(GITHUB_RAW_URL)
+		end)
+		if success and result and #result > 0 then
+			-- Compare or simply load the latest code if it differs, or force refresh on execution
+			-- To make sure it always updates on load, we execute the fetched string:
+			-- (Uncomment below once you put your raw GitHub URL)
+			-- _G.ForceScriptRefresh = true
+			-- loadstring(result)()
+			-- return
+		end
+	end
+end)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +37,10 @@ local GuiService = game:GetService("GuiService")
 
 local LP = Players.LocalPlayer
 if not LP then return end
+
+-- Execution grace period tracker (prevents immediate reset upon script execution)
+local scriptLoadTime = tick()
+local GRACE_PERIOD = 3 -- Seconds to wait before allowing any automatic resets
 
 -- Restricted Users List
 local restrictedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
@@ -39,7 +67,6 @@ pcall(function()
 	settings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
 end)
 
--- Cap FPS safely if setfpscap function exists in executor environment
 if typeof(setfpscap) == "function" then
 	pcall(setfpscap, 10)
 end
@@ -51,7 +78,6 @@ local lastRoundIdentifier = nil
 local gunHeldTimer = 0
 local isResettingFromHold = false
 
--- Tracking variables for restricted users standing still
 local targetLastPositions = {}
 local targetStillTimers = {}
 local isResettingFromTargetStill = false
@@ -90,7 +116,7 @@ end
 pcall(applyCleanSky)
 
 --------------------------------------------------------------------------------
--- AUTO RECONNECT TO SAME EXACT SERVER ON DISCONNECT / KICK
+-- AUTO RECONNECT
 --------------------------------------------------------------------------------
 local currentPlaceId = game.PlaceId
 local currentJobId = game.JobId
@@ -119,7 +145,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- NO COLLISION FOR OTHER PLAYERS
+-- NO COLLISION
 --------------------------------------------------------------------------------
 RunService.Stepped:Connect(function()
 	pcall(function()
@@ -136,7 +162,7 @@ RunService.Stepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- MAP & CHARACTER CLEANING SETUP
+-- CLEANING HELPERS
 --------------------------------------------------------------------------------
 local function ShouldDestroy(obj)
 	if not obj or not obj.Parent then return false end
@@ -215,6 +241,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 LP.CharacterAdded:Connect(function(char)
+	scriptLoadTime = tick() -- Reset grace timer on respawn
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
 	gunHeldTimer = 0
@@ -259,7 +286,7 @@ LP:GetPropertyChangedSignal("DisplayName"):Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- HELPER: FETCH CURRENT ROLE DATA & WEAPON CHECKS
+-- WEAPON & ROLE CHECKERS
 --------------------------------------------------------------------------------
 local function getPlayerData()
 	local getPlayerDataRemote = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
@@ -298,7 +325,6 @@ end
 local function hasGunTool()
 	local char = LP.Character
 	local backpack = LP:FindFirstChild("Backpack")
-
 	if isHoldingGun() then return true end
 	if backpack and (backpack:FindFirstChild("Gun") or backpack:FindFirstChild("Revolver")) then
 		return true
@@ -309,100 +335,97 @@ end
 local function hasKnifeTool()
 	local char = LP.Character
 	local backpack = LP:FindFirstChild("Backpack")
-
 	if char and char:FindFirstChild("Knife") then return true end
 	if backpack and backpack:FindFirstChild("Knife") then return true end
 	return false
 end
 
+-- Checks if ANY player in the server currently holds or has a gun/knife
+local function anyoneHasWeapon()
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local bp = player:FindFirstChild("Backpack")
+		
+		local hasCharWeapon = char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver") or char:FindFirstChild("Knife"))
+		local hasBpWeapon = bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver") or bp:FindFirstChild("Knife"))
+		
+		if hasCharWeapon or hasBpWeapon then
+			return true
+		end
+	end
+	return false
+end
+
 --------------------------------------------------------------------------------
--- CONTINUOUS GUN HOLD TIMER MONITORING
+-- GUN HOLD TIMER MONITORING
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
-		if isHoldingGun() and not isResettingFromHold then
-			gunHeldTimer = gunHeldTimer + 0.5
-			if gunHeldTimer >= 5 then
-				isResettingFromHold = true
-				
-				local myRole, murdererPlayerName = getPlayerData()
-				local isLocalRestricted = isRestrictedUser(LP.Name)
-				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
+		if tick() - scriptLoadTime > GRACE_PERIOD then
+			if isHoldingGun() and not isResettingFromHold then
+				gunHeldTimer = gunHeldTimer + 0.5
+				if gunHeldTimer >= 5 then
+					isResettingFromHold = true
+					local _, murdererPlayerName = getPlayerData()
+					local isLocalRestricted = isRestrictedUser(LP.Name)
+					local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
-				if not (isLocalRestricted or isMurdererRestricted) then
-					local character = LP.Character
-					if character then
-						CleanCharacter(character)
-						local humanoid = character:FindFirstChild("Humanoid")
-						if humanoid then
-							humanoid.Health = 0
+					if not (isLocalRestricted or isMurdererRestricted) then
+						local character = LP.Character
+						if character then
+							CleanCharacter(character)
+							local humanoid = character:FindFirstChild("Humanoid")
+							if humanoid then humanoid.Health = 0 end
 						end
 					end
 				end
+			else
+				gunHeldTimer = 0
 			end
-		else
-			gunHeldTimer = 0
 		end
 	end
 end)
 
 --------------------------------------------------------------------------------
--- MONITOR ALL RESTRICTED USERS STANDING STILL WHILE BOT HAS KNIFE
+-- B6O6S STILLNESS MONITOR (WHEN WEAPON EXISTS)
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
-		if hasKnifeTool() and not isResettingFromTargetStill then
-			local triggeredReset = false
-
-			for _, targetName in ipairs(restrictedNames) do
-				local targetPlayer = Players:FindFirstChild(targetName)
+		if tick() - scriptLoadTime > GRACE_PERIOD and not isResettingFromTargetStill then
+			if anyoneHasWeapon() then
+				local targetPlayer = Players:FindFirstChild("B6O6S")
 				if targetPlayer and targetPlayer.Character then
 					local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
 					if targetRoot then
 						local currentPos = targetRoot.Position
-						local lastPos = targetLastPositions[targetName]
+						local lastPos = targetLastPositions["B6O6S"]
 
 						if lastPos then
-							-- Check if position changed less than 0.5 units (standing still)
 							if (currentPos - lastPos).Magnitude < 0.5 then
-								targetStillTimers[targetName] = (targetStillTimers[targetName] or 0) + 0.5
+								targetStillTimers["B6O6S"] = (targetStillTimers["B6O6S"] or 0) + 0.5
 							else
-								targetStillTimers[targetName] = 0
+								targetStillTimers["B6O6S"] = 0
 							end
 						else
-							targetStillTimers[targetName] = 0
+							targetStillTimers["B6O6S"] = 0
 						end
-						targetLastPositions[targetName] = currentPos
+						targetLastPositions["B6O6S"] = currentPos
 
-						-- Check if this specific user stood still for 5+ seconds
-						if (targetStillTimers[targetName] or 0) >= 5 then
-							triggeredReset = true
-							break
+						if (targetStillTimers["B6O6S"] or 0) >= 5 then
+							isResettingFromTargetStill = true
+							local character = LP.Character
+							if character then
+								CleanCharacter(character)
+								local humanoid = character:FindFirstChild("Humanoid")
+								if humanoid then humanoid.Health = 0 end
+							end
 						end
-					else
-						targetStillTimers[targetName] = 0
-						targetLastPositions[targetName] = nil
-					end
-				else
-					targetStillTimers[targetName] = 0
-					targetLastPositions[targetName] = nil
-				end
-			end
-
-			if triggeredReset then
-				isResettingFromTargetStill = true
-				local character = LP.Character
-				if character then
-					CleanCharacter(character)
-					local humanoid = character:FindFirstChild("Humanoid")
-					if humanoid then
-						humanoid.Health = 0
 					end
 				end
+			else
+				targetStillTimers["B6O6S"] = 0
+				targetLastPositions["B6O6S"] = nil
 			end
-		else
-			targetStillTimers = {}
-			targetLastPositions = {}
 		end
 	end
 end)
@@ -420,20 +443,22 @@ function CheckRole()
 		
 		if myRole then
 			task.spawn(function()
+				task.wait(0.5) -- Allow grace period on round change
+				if tick() - scriptLoadTime <= GRACE_PERIOD then return end
+
 				local isLocalRestricted = isRestrictedUser(LP.Name)
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
 				if myRole == "Innocent" then
-					-- Check if innocent picked up a dropped Gun tool
 					if hasGunTool() then
 						if not (isLocalRestricted or isMurdererRestricted) then
 							task.wait(5)
-							local character = LP.Character
-							if character then
-								CleanCharacter(character)
-								local humanoid = character:FindFirstChild("Humanoid")
-								if humanoid then
-									humanoid.Health = 0
+							if tick() - scriptLoadTime > GRACE_PERIOD then
+								local character = LP.Character
+								if character then
+									CleanCharacter(character)
+									local humanoid = character:FindFirstChild("Humanoid")
+									if humanoid then humanoid.Health = 0 end
 								end
 							end
 						end
@@ -441,24 +466,20 @@ function CheckRole()
 					return
 
 				elseif myRole == "Sheriff" or myRole == "Hero" or hasGunTool() then
-					if isLocalRestricted or isMurdererRestricted then
-						-- Do NOT reset if local player is restricted OR if the Murderer is a restricted user
-						return
-					else
-						-- Non-restricted Sheriff/Hero or player with Gun: Wait 5s, then reset directly
+					if not (isLocalRestricted or isMurdererRestricted) then
 						task.wait(5)
-						local character = LP.Character
-						if character then
-							CleanCharacter(character)
-							local humanoid = character:FindFirstChild("Humanoid")
-							if humanoid then
-								humanoid.Health = 0
+						if tick() - scriptLoadTime > GRACE_PERIOD then
+							local character = LP.Character
+							if character then
+								CleanCharacter(character)
+								local humanoid = character:FindFirstChild("Humanoid")
+								if humanoid then humanoid.Health = 0 end
 							end
 						end
 					end
+					return
 
 				elseif myRole == "Murderer" then
-					-- Murderer never resets automatically at round start
 					return
 				end
 			end)
