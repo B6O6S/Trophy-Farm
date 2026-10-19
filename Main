@@ -7,11 +7,11 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 if not player then return end
 
--- Silent refresh if already running (No spam notification)
+-- Auto-refresh if already running (Silent cleanup, no spam notification)
 local existingGui = CoreGui:FindFirstChild("AutoMapStatusGui") or player.PlayerGui:FindFirstChild("AutoMapStatusGui")
 if existingGui then
 	existingGui:Destroy()
-	print("[AutoMap] Refreshed with latest version!")
+	print("[AutoMap] Refreshed script with latest version!")
 end
 
 pcall(function() setfpscap(30) end)
@@ -56,7 +56,7 @@ Workspace.ChildAdded:Connect(function(child)
 	end
 end)
 
--- Force specific parts to be CanCollide = true (Optimized with heartbeat throttling)
+-- Force specific parts to be CanCollide = true (Throttled to prevent FPS drops)
 local heartbeatAccumulator = 0
 RunService.Stepped:Connect(function(dt)
 	heartbeatAccumulator = heartbeatAccumulator + dt
@@ -161,6 +161,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 local CHECK_DELAY = 0.5
+local TELEPORT_DISTANCE = -2 
 local RESET_DELAY = 0.2 
 local RESPAWN_DELAY = 0
 local POST_MATCH_WAIT = 10
@@ -229,10 +230,7 @@ end
 
 local function findDetectorPart(votePad)
 	for _, child in ipairs(votePad:GetDescendants()) do
-		if child:IsA("TouchTransmitter") then
-			return child.Parent
-		end
-		if child:IsA("BasePart") and (child.Name:match("Detector") or child.Name:match("Pad") or child.Name:match("Touch")) then
+		if child:IsA("BasePart") and (child.Name:match("^Detector") or child.Name:match("Detector")) then
 			return child
 		end
 	end
@@ -272,16 +270,18 @@ local function findSpecificMap(targetMapName)
 	for i = 1, 3 do
 		local votePad = votePadsFolder:FindFirstChild("VotePad" .. i)
 		if votePad then
-			local voteInfoGui = votePad:FindFirstChild("VoteInfoGui") or votePad:FindFirstChildWhichIsA("SurfaceGui", true) or votePad:FindFirstChildWhichIsA("BillboardGui", true)
-			local container = voteInfoGui and (voteInfoGui:FindFirstChild("Container") or voteInfoGui)
-			local mapNameObj = container and (container:FindFirstChild("MapName") or container:FindFirstChild("Map") or container:FindFirstChildWhichIsA("TextLabel", true))
+			local voteInfoGui = votePad:FindFirstChild("VoteInfoGui")
+			local container = voteInfoGui and voteInfoGui:FindFirstChild("Container")
+			local mapNameObj = container and container:FindFirstChild("MapName")
 
-			if mapNameObj and mapNameObj:IsA("TextLabel") then
+			if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
 				local text = tostring(mapNameObj.Text)
-				if text ~= "" and isMatchingMap(text, targetMapName) then
-					local detectorPart = findDetectorPart(votePad)
-					if detectorPart then
-						return { name = targetMapName, text = text, part = detectorPart }
+				if text ~= "" then
+					if isMatchingMap(text, targetMapName) then
+						local detectorPart = findDetectorPart(votePad)
+						if detectorPart then
+							return { name = targetMapName, text = text, part = detectorPart }
+						end
 					end
 				end
 			end
@@ -298,7 +298,7 @@ local function findAnyPriorityMap()
 	return nil
 end
 
-local function triggerVote(targetPart)
+local function teleportToMap(targetPart)
 	local success, err = pcall(function()
 		if checkWorkspaceMap() then return false end
 
@@ -310,25 +310,21 @@ local function triggerVote(targetPart)
 		if not root or not humanoid or humanoid.Health <= 0 then return false end
 		if checkWorkspaceMap() then return false end
 
+		-- Ensure reliable touch using firetouchinterest if available alongside CFrame teleportation
 		if firetouchinterest then
 			firetouchinterest(root, targetPart, 0)
 			task.wait(0.05)
 			firetouchinterest(root, targetPart, 1)
 		end
 
-		root.CFrame = targetPart.CFrame
+		local targetPos = targetPart.Position + Vector3.new(0, TELEPORT_DISTANCE, 0)
+
+		root.CFrame = CFrame.new(targetPos)
 		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 
-		for _ = 1, 2 do
-			if checkWorkspaceMap() or not root or not targetPart then break end
-			root.CFrame = targetPart.CFrame
-			task.wait(0.05)
-		end
-
 		if RESET_DELAY > 0 then task.wait(RESET_DELAY) end
 		if checkWorkspaceMap() then return false end
-
 		if humanoid and humanoid.Health > 0 then humanoid.Health = 0 end
 		if RESPAWN_DELAY > 0 then task.wait(RESPAWN_DELAY) end
 		
@@ -384,14 +380,13 @@ task.spawn(function()
 					while (tick() - voteStartTime < VOTE_DURATION) and not checkWorkspaceMap() do
 						local timeLeft = math.ceil(VOTE_DURATION - (tick() - voteStartTime))
 						local currentResult = findSpecificMap(lockedMapName)
-						
 						if currentResult then
 							updateStatus(currentResult.name .. " (" .. timeLeft .. "s)")
 							
-							-- Prevent voting twice during the same round sequence
+							-- Ensure it only auto-votes once per match voting sequence
 							if not hasVotedThisRound then
 								hasVotedThisRound = true
-								local tpSuccess = triggerVote(currentResult.part)
+								local tpSuccess = teleportToMap(currentResult.part)
 								if not tpSuccess or checkWorkspaceMap() then break end
 							end
 						else
