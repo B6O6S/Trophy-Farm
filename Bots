@@ -1,32 +1,10 @@
--- Force Refresh handling
+-- Force Refresh / Execution Guard
 if not _G.ForceScriptRefresh then
 	if getgenv().BotScriptExecuted or _G.BotScriptLoaded then return end
 end
 getgenv().BotScriptExecuted = true
 _G.BotScriptLoaded = true
 _G.ForceScriptRefresh = nil
-
---------------------------------------------------------------------------------
--- AUTO-UPDATE / REFRESH FROM GITHUB
---------------------------------------------------------------------------------
-local GITHUB_RAW_URL = "https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"
-
-task.spawn(function()
-	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "" then
-		local success, result = pcall(function()
-			return game:HttpGet(GITHUB_RAW_URL .. "?t=" .. tick())
-		end)
-		if success and result and #result > 0 then
-			-- Verification check to prevent infinite recursion loop
-			if not _G.RunningLatestVersion then
-				_G.RunningLatestVersion = true
-				_G.ForceScriptRefresh = true
-				loadstring(result)()
-				return
-			end
-		end
-	end
-end)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -38,10 +16,6 @@ local GuiService = game:GetService("GuiService")
 
 local LP = Players.LocalPlayer
 if not LP then return end
-
--- Grace period to prevent immediate resets on script execution
-local scriptLoadTime = tick()
-local GRACE_PERIOD = 3 
 
 -- Restricted Users List
 local restrictedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
@@ -59,6 +33,29 @@ end
 if isRestrictedUser(LP.Name) then
 	return
 end
+
+--------------------------------------------------------------------------------
+-- INITIAL LOAD GRACE PERIOD
+--------------------------------------------------------------------------------
+local scriptLoadTime = tick()
+local INITIAL_LOAD_DELAY = 5 -- Seconds to ignore resets after executing script
+
+--------------------------------------------------------------------------------
+-- AUTO-UPDATE / REFRESH FROM GITHUB
+--------------------------------------------------------------------------------
+local GITHUB_RAW_URL = "https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"
+
+task.spawn(function()
+	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "" and not _G.RunningLatestVersion then
+		local success, result = pcall(function()
+			return game:HttpGet(GITHUB_RAW_URL .. "?t=" .. tick())
+		end)
+		if success and result and #result > 0 then
+			_G.RunningLatestVersion = true
+			-- Avoid immediate nested execution; updates will take effect on next server load/reconnect
+		end
+	end
+end)
 
 --------------------------------------------------------------------------------
 -- GRAPHICS QUALITY & FPS OPTIMIZATION
@@ -242,7 +239,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 LP.CharacterAdded:Connect(function(char)
-	scriptLoadTime = tick() -- Reset grace period on respawn
+	scriptLoadTime = tick()
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
 	gunHeldTimer = 0
@@ -333,7 +330,6 @@ local function hasGunTool()
 	return false
 end
 
--- Checks if ANY player in the server currently has a gun or knife equipped/in backpack
 local function anyoneHasWeapon()
 	for _, player in ipairs(Players:GetPlayers()) do
 		local char = player.Character
@@ -354,7 +350,7 @@ end
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
-		if tick() - scriptLoadTime > GRACE_PERIOD then
+		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
 			if isHoldingGun() and not isResettingFromHold then
 				gunHeldTimer = gunHeldTimer + 0.5
 				if gunHeldTimer >= 5 then
@@ -380,11 +376,11 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- B6O6S STILLNESS MONITOR (IF ANYONE HAS WEAPON)
+-- B6O6S STILLNESS MONITOR
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
-		if tick() - scriptLoadTime > GRACE_PERIOD and not isResettingFromTargetStill then
+		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and not isResettingFromTargetStill then
 			if anyoneHasWeapon() then
 				local targetPlayer = Players:FindFirstChild("B6O6S")
 				if targetPlayer and targetPlayer.Character then
@@ -401,6 +397,7 @@ task.spawn(function()
 							end
 						else
 							targetStillTimers["B6O6S"] = 0
+							targetLastPositions["B6O6S"] = currentPos
 						end
 						targetLastPositions["B6O6S"] = currentPos
 
@@ -427,6 +424,8 @@ end)
 -- ROLE CHECKER & REACTION LOGIC
 --------------------------------------------------------------------------------
 function CheckRole()
+	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
+
 	local myRole, murdererPlayerName, roundIdentifier = getPlayerData()
 	if not myRole then return end
 
@@ -436,9 +435,6 @@ function CheckRole()
 		
 		if myRole then
 			task.spawn(function()
-				task.wait(0.5)
-				if tick() - scriptLoadTime <= GRACE_PERIOD then return end
-
 				local isLocalRestricted = isRestrictedUser(LP.Name)
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
@@ -446,7 +442,7 @@ function CheckRole()
 					if hasGunTool() then
 						if not (isLocalRestricted or isMurdererRestricted) then
 							task.wait(5)
-							if tick() - scriptLoadTime > GRACE_PERIOD then
+							if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
 								local character = LP.Character
 								if character then
 									CleanCharacter(character)
@@ -461,7 +457,7 @@ function CheckRole()
 				elseif myRole == "Sheriff" or myRole == "Hero" or hasGunTool() then
 					if not (isLocalRestricted or isMurdererRestricted) then
 						task.wait(5)
-						if tick() - scriptLoadTime > GRACE_PERIOD then
+						if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
 							local character = LP.Character
 							if character then
 								CleanCharacter(character)
