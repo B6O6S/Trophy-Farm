@@ -159,11 +159,10 @@ RunService.Stepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- MAP CLEANING ONLY (PLAYER CHARACTERS ARE NOT TOUCHED)
+-- MAP CLEANING ONLY
 --------------------------------------------------------------------------------
 local function ShouldDestroyMapItem(obj)
 	if not obj or not obj.Parent then return false end
-	-- Skip anything inside player characters
 	if obj:FindFirstAncestorOfClass("Model") and Players:GetPlayerFromCharacter(obj:FindFirstAncestorOfClass("Model")) then
 		return false
 	end
@@ -245,7 +244,7 @@ end)
 --------------------------------------------------------------------------------
 local function getPlayerData()
 	local getPlayerDataRemote = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
-	if not getPlayerDataRemote then return nil, nil, "" end
+	if not getPlayerDataRemote me.nil, nil, "" end
 
 	local success, result = pcall(function()
 		return getPlayerDataRemote:InvokeServer()
@@ -282,6 +281,21 @@ local function hasGunTool()
 	local backpack = LP:FindFirstChild("Backpack")
 	if isHoldingGun() then return true end
 	if backpack and (backpack:FindFirstChild("Gun") or backpack:FindFirstChild("Revolver")) then
+		return true
+	end
+	return false
+end
+
+-- Checks if B6O6S has a gun equipped or in their backpack
+local function targetHasGun(targetPlayer)
+	if not targetPlayer then return false end
+	local char = targetPlayer.Character
+	local bp = targetPlayer:FindFirstChild("Backpack")
+
+	if char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver")) then
+		return true
+	end
+	if bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver")) then
 		return true
 	end
 	return false
@@ -337,9 +351,11 @@ end)
 task.spawn(function()
 	while task.wait(0.5) do
 		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and not isResettingFromTargetStill then
-			if anyoneHasWeapon() then
-				local targetPlayer = Players:FindFirstChild("B6O6S")
-				if targetPlayer and targetPlayer.Character then
+			local targetPlayer = Players:FindFirstChild("B6O6S")
+			
+			-- Condition check: Anyone has a weapon AND B6O6S is in game AND B6O6S does NOT have the gun
+			if anyoneHasWeapon() and targetPlayer and not targetHasGun(targetPlayer) then
+				if targetPlayer.Character then
 					local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
 					if targetRoot then
 						local currentPos = targetRoot.Position
