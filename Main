@@ -4,7 +4,6 @@ local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
 local StarterGui = game:GetService("StarterGui")
 local RunService = game:GetService("RunService")
-local PhysicsService = game:GetService("PhysicsService")
 
 local player = Players.LocalPlayer
 if not player then return end
@@ -153,18 +152,6 @@ Players.PlayerAdded:Connect(function(p)
 	p.CharacterAdded:Connect(function(c) SetupCharacter(p, c) end)
 end)
 
--- Optimized High-Performance Smooth Noclip (Forced through physics engine)
-RunService.Stepped:Connect(function()
-	local char = player.Character
-	if char then
-		for _, part in ipairs(char:GetDescendants()) do
-			if part:IsA("BasePart") then
-				part.CanCollide = false
-			end
-		end
-	end
-end)
-
 local CHECK_DELAY = 0.5
 local TELEPORT_DISTANCE = -2 
 local RESET_DELAY = 0.2 
@@ -223,25 +210,6 @@ local function updateStatus(text)
 	statusLabel.Text = text
 end
 
-local function applyPlayerNoCollision(char)
-	local playerParts = {}
-	for _, p in ipairs(char:GetDescendants()) do
-		if p:IsA("BasePart") then table.insert(playerParts, p) end
-	end
-
-	for _, otherPlayer in ipairs(Players:GetPlayers()) do
-		if otherPlayer ~= player and otherPlayer.Character then
-			for _, otherPart in ipairs(otherPlayer.Character:GetDescendants()) do
-				if otherPart:IsA("BasePart") then
-					for _, myPart in ipairs(playerParts) do
-						pcall(function() myPart:SetNetworkOwner(player) end)
-					end
-				end
-			end
-		end
-	end
-end
-
 local function getCharacter()
 	local char = player.Character
 	if not char or not char:FindFirstChild("HumanoidRootPart") then
@@ -251,13 +219,6 @@ local function getCharacter()
 	end
 	return char
 end
-
-player.CharacterAdded:Connect(function(char)
-	task.spawn(function()
-		local hrp = char:WaitForChild("HumanoidRootPart", 5)
-		if hrp then applyPlayerNoCollision(char) end
-	end)
-end)
 
 local function findDetectorPart(votePad)
 	for _, child in ipairs(votePad:GetDescendants()) do
@@ -280,6 +241,18 @@ local function checkWorkspaceMap()
 	return nil
 end
 
+local function isMatchingMap(uiText, targetMapName)
+	local cleanUI = string.lower(string.gsub(uiText, "%s+", ""))
+	local cleanTarget = string.lower(string.gsub(targetMapName, "%s+", ""))
+	
+	-- Handle specific overlap issue (e.g., "House 2" vs "Haunted House 2")
+	if cleanTarget == "house2" then
+		return cleanUI == "house2"
+	end
+	
+	return string.find(cleanUI, cleanTarget, 1, true) ~= nil
+end
+
 local function findSpecificMap(targetMapName)
 	local lobby = Workspace:FindFirstChild("Lobby")
 	if not lobby then return nil end
@@ -298,7 +271,7 @@ local function findSpecificMap(targetMapName)
 			if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
 				local text = tostring(mapNameObj.Text)
 				if text ~= "" then
-					if string.find(string.lower(text), string.lower(targetMapName), 1, true) then
+					if isMatchingMap(text, targetMapName) then
 						local detectorPart = findDetectorPart(votePad)
 						if detectorPart then
 							return { name = targetMapName, text = text, part = detectorPart }
@@ -354,7 +327,6 @@ local function teleportToMap(targetPart)
 	return success and err ~= false
 end
 
-if player.Character then applyPlayerNoCollision(player.Character) end
 updateStatus("Scanning...")
 
 task.spawn(function()
