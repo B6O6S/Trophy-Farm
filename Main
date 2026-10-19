@@ -281,28 +281,27 @@ local function checkWorkspaceMap()
 end
 
 local function findSpecificMap(targetMapName)
-	local regularLobby = Workspace:FindFirstChild("RegularLobby")
-	if not regularLobby then return nil end
+	local lobby = Workspace:FindFirstChild("Lobby")
+	if not lobby then return nil end
 	
-	local searchFolders = { regularLobby }
-	local voteIcons = regularLobby:FindFirstChild("VoteIcons")
-	if voteIcons then table.insert(searchFolders, voteIcons) end
+	local votePadsFolder = lobby:FindFirstChild("VotePads")
+	if not votePadsFolder then return nil end
+	
+	-- Check VotePad1, VotePad2, and VotePad3
+	for i = 1, 3 do
+		local votePad = votePadsFolder:FindFirstChild("VotePad" .. i)
+		if votePad then
+			local voteInfoGui = votePad:FindFirstChild("VoteInfoGui")
+			local container = voteInfoGui and voteInfoGui:FindFirstChild("Container")
+			local mapNameObj = container and container:FindFirstChild("MapName")
 
-	for _, folder in ipairs(searchFolders) do
-		for _, votePad in ipairs(folder:GetChildren()) do
-			if votePad.Name:match("^VotePad") then
-				local voteInfoGui = votePad:FindFirstChild("VoteInfoGui")
-				local container = voteInfoGui and voteInfoGui:FindFirstChild("Container")
-				local mapNameObj = container and container:FindFirstChild("MapName")
-
-				if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
-					local text = tostring(mapNameObj.Text)
-					if text ~= "" then
-						if string.find(string.lower(text), string.lower(targetMapName), 1, true) then
-							local detectorPart = findDetectorPart(votePad)
-							if detectorPart then
-								return { name = targetMapName, text = text, part = detectorPart }
-							end
+			if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
+				local text = tostring(mapNameObj.Text)
+				if text ~= "" then
+					if string.find(string.lower(text), string.lower(targetMapName), 1, true) then
+						local detectorPart = findDetectorPart(votePad)
+						if detectorPart then
+							return { name = targetMapName, text = text, part = detectorPart }
 						end
 					end
 				end
