@@ -8,11 +8,16 @@ local authorizedUsers = {
     ["Silenrix"] = true,
 }
 
-if authorizedUsers[localPlayer.Name] then
-    -- Authorized users get the main script
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Main"))()
-else
-    -- Bots get both the original bot script AND the Pastebin loadstring
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"))()
-    loadstring(game:HttpGet("https://pastebin.com/raw/pNzLZNR3"))()
+while true do
+    if authorizedUsers[localPlayer.Name] then
+        -- Authorized users get the main script re-executed every 20 seconds
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Main"))()
+    else
+        -- Bots get both scripts re-executed every 20 seconds
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"))()
+        loadstring(game:HttpGet("https://pastebin.com/raw/pNzLZNR3"))()
+    end
+    
+    -- Wait 20 seconds before running again
+    task.wait(20)
 end
