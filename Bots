@@ -51,6 +51,11 @@ local lastRoundIdentifier = nil
 local gunHeldTimer = 0
 local isResettingFromHold = false
 
+-- Tracking variables for restricted users standing still
+local targetLastPositions = {}
+local targetStillTimers = {}
+local isResettingFromTargetStill = false
+
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
 --------------------------------------------------------------------------------
@@ -131,26 +136,8 @@ RunService.Stepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- MAP CLEANING & PLATFORM SETUP
+-- MAP & CHARACTER CLEANING SETUP
 --------------------------------------------------------------------------------
-local function EnsurePlatform()
-	local plat = Workspace:FindFirstChild("MurdererPlatform")
-	if not plat then
-		plat = Instance.new("Part")
-		plat.Name = "MurdererPlatform"
-		plat.Size = Vector3.new(20, 1, 20)
-		plat.Position = Vector3.new(100, 98, 100)
-		plat.Anchored = true
-		plat.BrickColor = BrickColor.new("Medium stone grey")
-		plat.Transparency = 0.9
-		plat.Parent = Workspace
-	else
-		plat.BrickColor = BrickColor.new("Medium stone grey")
-		plat.Transparency = 0.9
-	end
-	return plat
-end
-
 local function ShouldDestroy(obj)
 	if not obj or not obj.Parent then return false end
 	if obj.Name == "Raggy" or obj:IsA("Sound") then return true end
@@ -178,7 +165,6 @@ local function CleanCharacter(character)
 end
 
 local function CleanMap()
-	EnsurePlatform()
 	pcall(function()
 		local displays = Workspace:FindFirstChild("WeaponDisplays")
 		if displays then displays:Destroy() end
@@ -230,7 +216,10 @@ end)
 
 LP.CharacterAdded:Connect(function(char)
 	isResettingFromHold = false
+	isResettingFromTargetStill = false
 	gunHeldTimer = 0
+	targetLastPositions = {}
+	targetStillTimers = {}
 	task.spawn(function()
 		task.wait(0.2)
 		CleanMap()
@@ -317,6 +306,15 @@ local function hasGunTool()
 	return false
 end
 
+local function hasKnifeTool()
+	local char = LP.Character
+	local backpack = LP:FindFirstChild("Backpack")
+
+	if char and char:FindFirstChild("Knife") then return true end
+	if backpack and backpack:FindFirstChild("Knife") then return true end
+	return false
+end
+
 --------------------------------------------------------------------------------
 -- CONTINUOUS GUN HOLD TIMER MONITORING
 --------------------------------------------------------------------------------
@@ -332,16 +330,10 @@ task.spawn(function()
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
 				if not (isLocalRestricted or isMurdererRestricted) then
-					EnsurePlatform()
 					local character = LP.Character
 					if character then
 						CleanCharacter(character)
-						local root = character:FindFirstChild("HumanoidRootPart")
 						local humanoid = character:FindFirstChild("Humanoid")
-						
-						if root then
-							root.CFrame = CFrame.new(100, 100, 100)
-						end
 						if humanoid then
 							humanoid.Health = 0
 						end
@@ -350,6 +342,67 @@ task.spawn(function()
 			end
 		else
 			gunHeldTimer = 0
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- MONITOR ALL RESTRICTED USERS STANDING STILL WHILE BOT HAS KNIFE
+--------------------------------------------------------------------------------
+task.spawn(function()
+	while task.wait(0.5) do
+		if hasKnifeTool() and not isResettingFromTargetStill then
+			local triggeredReset = false
+
+			for _, targetName in ipairs(restrictedNames) do
+				local targetPlayer = Players:FindFirstChild(targetName)
+				if targetPlayer and targetPlayer.Character then
+					local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+					if targetRoot then
+						local currentPos = targetRoot.Position
+						local lastPos = targetLastPositions[targetName]
+
+						if lastPos then
+							-- Check if position changed less than 0.5 units (standing still)
+							if (currentPos - lastPos).Magnitude < 0.5 then
+								targetStillTimers[targetName] = (targetStillTimers[targetName] or 0) + 0.5
+							else
+								targetStillTimers[targetName] = 0
+							end
+						else
+							targetStillTimers[targetName] = 0
+						end
+						targetLastPositions[targetName] = currentPos
+
+						-- Check if this specific user stood still for 5+ seconds
+						if (targetStillTimers[targetName] or 0) >= 5 then
+							triggeredReset = true
+							break
+						end
+					else
+						targetStillTimers[targetName] = 0
+						targetLastPositions[targetName] = nil
+					end
+				else
+					targetStillTimers[targetName] = 0
+					targetLastPositions[targetName] = nil
+				end
+			end
+
+			if triggeredReset then
+				isResettingFromTargetStill = true
+				local character = LP.Character
+				if character then
+					CleanCharacter(character)
+					local humanoid = character:FindFirstChild("Humanoid")
+					if humanoid then
+						humanoid.Health = 0
+					end
+				end
+			end
+		else
+			targetStillTimers = {}
+			targetLastPositions = {}
 		end
 	end
 end)
@@ -374,20 +427,14 @@ function CheckRole()
 					-- Check if innocent picked up a dropped Gun tool
 					if hasGunTool() then
 						if not (isLocalRestricted or isMurdererRestricted) then
-							EnsurePlatform()
-							local character = LP.Character or LP.CharacterAdded:Wait()
-							CleanCharacter(character)
-							local root = character:WaitForChild("HumanoidRootPart", 5)
-							local humanoid = character:WaitForChild("Humanoid", 5)
-							
-							if root then
-								root.CFrame = CFrame.new(100, 100, 100)
-							end
-
 							task.wait(5)
-							
-							if humanoid then
-								humanoid.Health = 0
+							local character = LP.Character
+							if character then
+								CleanCharacter(character)
+								local humanoid = character:FindFirstChild("Humanoid")
+								if humanoid then
+									humanoid.Health = 0
+								end
 							end
 						end
 					end
@@ -398,27 +445,20 @@ function CheckRole()
 						-- Do NOT reset if local player is restricted OR if the Murderer is a restricted user
 						return
 					else
-						-- Non-restricted Sheriff/Hero or player with Gun: Teleport to platform, wait 5s, then reset
-						EnsurePlatform()
-						local character = LP.Character or LP.CharacterAdded:Wait()
-						CleanCharacter(character)
-						local root = character:WaitForChild("HumanoidRootPart", 5)
-						local humanoid = character:WaitForChild("Humanoid", 5)
-						
-						if root then
-							root.CFrame = CFrame.new(100, 100, 100)
-						end
-
-						-- Wait 5 seconds before resetting
+						-- Non-restricted Sheriff/Hero or player with Gun: Wait 5s, then reset directly
 						task.wait(5)
-						
-						if humanoid then
-							humanoid.Health = 0
+						local character = LP.Character
+						if character then
+							CleanCharacter(character)
+							local humanoid = character:FindFirstChild("Humanoid")
+							if humanoid then
+								humanoid.Health = 0
+							end
 						end
 					end
 
 				elseif myRole == "Murderer" then
-					-- Murderer never teleports and never resets
+					-- Murderer never resets automatically at round start
 					return
 				end
 			end)
