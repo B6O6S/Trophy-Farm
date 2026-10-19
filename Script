@@ -4,7 +4,7 @@ local localPlayer = Players.LocalPlayer
 local authorizedUsers = {
     ["B6O6S"] = true,
     ["3r_q5"] = true,
-    ["froos114"] = true,
+    ["FROOS114"] = true,
     ["Silenrix"] = true,
 }
 
