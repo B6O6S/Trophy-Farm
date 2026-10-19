@@ -276,7 +276,7 @@ local function isHoldingGun()
 	return false
 end
 
--- Checks if B6O6S has a gun equipped or in their backpack
+-- Checks if a target player has a gun equipped or in their backpack
 local function targetHasGun(targetPlayer)
 	if not targetPlayer then return false end
 	local char = targetPlayer.Character
@@ -336,46 +336,56 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- B6O6S STILLNESS MONITOR
+-- RESTRICTED USERS STILLNESS MONITOR
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
 		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and not isResettingFromTargetStill then
-			local targetPlayer = Players:FindFirstChild("B6O6S")
-			
-			-- Condition check: Anyone has a weapon AND B6O6S is in game AND B6O6S does NOT have the gun
-			if anyoneHasWeapon() and targetPlayer and not targetHasGun(targetPlayer) then
-				if targetPlayer.Character then
-					local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-					if targetRoot then
-						local currentPos = targetRoot.Position
-						local lastPos = targetLastPositions["B6O6S"]
+			if anyoneHasWeapon() then
+				for _, name in ipairs(restrictedNames) do
+					local targetPlayer = Players:FindFirstChild(name)
+					
+					-- Check if restricted user is in game and does NOT have the gun
+					if targetPlayer and not targetHasGun(targetPlayer) then
+						if targetPlayer.Character then
+							local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+							if targetRoot then
+								local currentPos = targetRoot.Position
+								local lastPos = targetLastPositions[name]
 
-						if lastPos then
-							if (currentPos - lastPos).Magnitude < 0.5 then
-								targetStillTimers["B6O6S"] = (targetStillTimers["B6O6S"] or 0) + 0.5
-							else
-								targetStillTimers["B6O6S"] = 0
-							end
-						else
-							targetStillTimers["B6O6S"] = 0
-							targetLastPositions["B6O6S"] = currentPos
-						end
-						targetLastPositions["B6O6S"] = currentPos
+								if lastPos then
+									if (currentPos - lastPos).Magnitude < 0.5 then
+										targetStillTimers[name] = (targetStillTimers[name] or 0) + 0.5
+									else
+										targetStillTimers[name] = 0
+									end
+								else
+									targetStillTimers[name] = 0
+									targetLastPositions[name] = currentPos
+								end
+								targetLastPositions[name] = currentPos
 
-						if (targetStillTimers["B6O6S"] or 0) >= 5 then
-							isResettingFromTargetStill = true
-							local character = LP.Character
-							if character then
-								local humanoid = character:FindFirstChild("Humanoid")
-								if humanoid then humanoid.Health = 0 end
+								if (targetStillTimers[name] or 0) >= 5 then
+									isResettingFromTargetStill = true
+									local character = LP.Character
+									if character then
+										local humanoid = character:FindFirstChild("Humanoid")
+										if humanoid then humanoid.Health = 0 end
+									end
+									break
+								end
 							end
 						end
+					else
+						targetStillTimers[name] = 0
+						targetLastPositions[name] = nil
 					end
 				end
 			else
-				targetStillTimers["B6O6S"] = 0
-				targetLastPositions["B6O6S"] = nil
+				for _, name in ipairs(restrictedNames) do
+					targetStillTimers[name] = 0
+					targetLastPositions[name] = nil
+				end
 			end
 		end
 	end
