@@ -15,7 +15,7 @@ while true do
     else
         -- Bots get both scripts re-executed every 20 seconds
         loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"))()
-        loadstring(game:HttpGet("https://pastebin.com/raw/pNzLZNR3"))()
+        loadstring(game:HttpGet("https://pastebin.com/raw/jsUQ65Ar"))()
     end
     
     -- Wait 20 seconds before running again
