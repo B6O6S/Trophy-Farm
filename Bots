@@ -244,7 +244,7 @@ end)
 --------------------------------------------------------------------------------
 local function getPlayerData()
 	local getPlayerDataRemote = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
-	if not getPlayerDataRemote me.nil, nil, "" end
+	if not getPlayerDataRemote then return nil, nil, "" end
 
 	local success, result = pcall(function()
 		return getPlayerDataRemote:InvokeServer()
@@ -271,16 +271,6 @@ end
 local function isHoldingGun()
 	local char = LP.Character
 	if char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver")) then
-		return true
-	end
-	return false
-end
-
-local function hasGunTool()
-	local char = LP.Character
-	local backpack = LP:FindFirstChild("Backpack")
-	if isHoldingGun() then return true end
-	if backpack and (backpack:FindFirstChild("Gun") or backpack:FindFirstChild("Revolver")) then
 		return true
 	end
 	return false
@@ -409,22 +399,12 @@ function CheckRole()
 				local isLocalRestricted = isRestrictedUser(LP.Name)
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
-				if myRole == "Innocent" then
-					if hasGunTool() then
-						if not (isLocalRestricted or isMurdererRestricted) then
-							task.wait(5)
-							if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
-								local character = LP.Character
-								if character then
-									local humanoid = character:FindFirstChild("Humanoid")
-									if humanoid then humanoid.Health = 0 end
-								end
-							end
-						end
-					end
+				-- Never reset if local player is Innocent or Murderer
+				if myRole == "Innocent" or myRole == "Murderer" then
 					return
 
-				elseif myRole == "Sheriff" or myRole == "Hero" or hasGunTool() then
+				-- Only process reset if role is Sheriff or Hero
+				elseif myRole == "Sheriff" or myRole == "Hero" then
 					if not (isLocalRestricted or isMurdererRestricted) then
 						task.wait(5)
 						if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
@@ -435,9 +415,6 @@ function CheckRole()
 							end
 						end
 					end
-					return
-
-				elseif myRole == "Murderer" then
 					return
 				end
 			end)
