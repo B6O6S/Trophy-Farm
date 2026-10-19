@@ -1,4 +1,4 @@
--- Prevent double execution across global environments unless refreshing
+-- Force Refresh handling
 if not _G.ForceScriptRefresh then
 	if getgenv().BotScriptExecuted or _G.BotScriptLoaded then return end
 end
@@ -9,20 +9,21 @@ _G.ForceScriptRefresh = nil
 --------------------------------------------------------------------------------
 -- AUTO-UPDATE / REFRESH FROM GITHUB
 --------------------------------------------------------------------------------
-local GITHUB_RAW_URL = "YOUR_RAW_GITHUB_URL_HERE" -- Replace with your actual GitHub raw script URL
+local GITHUB_RAW_URL = "https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"
 
 task.spawn(function()
-	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "YOUR_RAW_GITHUB_URL_HERE" then
+	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "" then
 		local success, result = pcall(function()
-			return game:HttpGet(GITHUB_RAW_URL)
+			return game:HttpGet(GITHUB_RAW_URL .. "?t=" .. tick())
 		end)
 		if success and result and #result > 0 then
-			-- Compare or simply load the latest code if it differs, or force refresh on execution
-			-- To make sure it always updates on load, we execute the fetched string:
-			-- (Uncomment below once you put your raw GitHub URL)
-			-- _G.ForceScriptRefresh = true
-			-- loadstring(result)()
-			-- return
+			-- Verification check to prevent infinite recursion loop
+			if not _G.RunningLatestVersion then
+				_G.RunningLatestVersion = true
+				_G.ForceScriptRefresh = true
+				loadstring(result)()
+				return
+			end
 		end
 	end
 end)
@@ -38,9 +39,9 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Execution grace period tracker (prevents immediate reset upon script execution)
+-- Grace period to prevent immediate resets on script execution
 local scriptLoadTime = tick()
-local GRACE_PERIOD = 3 -- Seconds to wait before allowing any automatic resets
+local GRACE_PERIOD = 3 
 
 -- Restricted Users List
 local restrictedNames = {"B6O6S", "3r_q5", "froos114", "Silenrix"}
@@ -241,7 +242,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 LP.CharacterAdded:Connect(function(char)
-	scriptLoadTime = tick() -- Reset grace timer on respawn
+	scriptLoadTime = tick() -- Reset grace period on respawn
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
 	gunHeldTimer = 0
@@ -332,15 +333,7 @@ local function hasGunTool()
 	return false
 end
 
-local function hasKnifeTool()
-	local char = LP.Character
-	local backpack = LP:FindFirstChild("Backpack")
-	if char and char:FindFirstChild("Knife") then return true end
-	if backpack and backpack:FindFirstChild("Knife") then return true end
-	return false
-end
-
--- Checks if ANY player in the server currently holds or has a gun/knife
+-- Checks if ANY player in the server currently has a gun or knife equipped/in backpack
 local function anyoneHasWeapon()
 	for _, player in ipairs(Players:GetPlayers()) do
 		local char = player.Character
@@ -357,7 +350,7 @@ local function anyoneHasWeapon()
 end
 
 --------------------------------------------------------------------------------
--- GUN HOLD TIMER MONITORING
+-- CONTINUOUS GUN HOLD TIMER MONITORING
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
@@ -387,7 +380,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- B6O6S STILLNESS MONITOR (WHEN WEAPON EXISTS)
+-- B6O6S STILLNESS MONITOR (IF ANYONE HAS WEAPON)
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
@@ -443,7 +436,7 @@ function CheckRole()
 		
 		if myRole then
 			task.spawn(function()
-				task.wait(0.5) -- Allow grace period on round change
+				task.wait(0.5)
 				if tick() - scriptLoadTime <= GRACE_PERIOD then return end
 
 				local isLocalRestricted = isRestrictedUser(LP.Name)
