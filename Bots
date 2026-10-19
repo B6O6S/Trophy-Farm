@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Restricted Users List
+-- Restricted Users List (FROOS114 is included here)
 local restrictedNames = {"B6O6S", "3r_q5", "FROOS114", "Silenrix"}
 
 local function isRestrictedUser(playerName)
