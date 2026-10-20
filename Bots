@@ -166,7 +166,7 @@ end)
 local function ShouldDestroyMapItem(obj)
 	if not obj or not obj.Parent then return false end
 	
-	-- DO NOT destroy any Tools so Knife equipment works properly
+	-- Ensure tools/weapons are never destroyed so the knife remains available
 	if obj:IsA("Tool") or obj:FindFirstAncestorOfClass("Tool") then
 		return false
 	end
@@ -316,7 +316,7 @@ local function anyoneHasWeapon()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER KILL ALL LOGIC
+-- MURDERER AUTOMATION LOGIC
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -334,7 +334,7 @@ local function runMurdererLogic()
 
 			local knife = char:FindFirstChild("Knife") or backpack:FindFirstChild("Knife")
 			
-			-- Stop loop if Knife is completely gone from inventory & character
+			-- Stop loop completely if the knife is gone from inventory/character
 			if not knife then
 				isMurdererLoopRunning = false
 				break
@@ -343,12 +343,12 @@ local function runMurdererLogic()
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			local root = char:FindFirstChild("HumanoidRootPart")
 
-			-- Equip knife if in backpack
+			-- Equip knife if it's in the backpack
 			if knife.Parent == backpack and humanoid then
 				humanoid:EquipTool(knife)
 			end
 
-			-- Bring and stab all non-restricted players
+			-- Bring and activate knife on non-restricted players
 			if root and knife.Parent == char then
 				for _, target in ipairs(Players:GetPlayers()) do
 					if target ~= LP and not isRestrictedUser(target.Name) then
@@ -359,9 +359,7 @@ local function runMurdererLogic()
 
 							if targetRoot and targetHum and targetHum.Health > 0 then
 								pcall(function()
-									-- Teleport target directly in front of knife
 									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
-									-- Activate knife
 									knife:Activate()
 								end)
 							end
@@ -439,7 +437,7 @@ task.spawn(function()
 									local character = LP.Character
 									if character then
 										local humanoid = character:FindFirstChild("Humanoid")
-										if humanoid me then humanoid.Health = 0 end
+										if humanoid then humanoid.Health = 0 end
 									end
 									break
 								end
@@ -478,7 +476,7 @@ function CheckRole()
 				local isLocalRestricted = isRestrictedUser(LP.Name)
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
-				-- Execute kill-all if local player is Murderer
+				-- Trigger Murderer automation if role is Murderer
 				if myRole == "Murderer" then
 					runMurdererLogic()
 					return
