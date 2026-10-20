@@ -316,7 +316,7 @@ local function anyoneHasWeapon()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC
+-- MURDERER AUTOMATION LOGIC (UPDATED & ROBUST)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -327,25 +327,29 @@ local function runMurdererLogic()
 			local char = LP.Character
 			local backpack = LP:FindFirstChild("Backpack")
 			
-			if not char or not backpack then
-				task.wait(0.2)
+			if not char then
+				task.wait(0.1)
 				continue
 			end
 
-			local knife = char:FindFirstChild("Knife") or backpack:FindFirstChild("Knife")
+			-- Look for Knife in character or backpack
+			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
 			
-			-- Stop loop completely if the knife is gone from inventory/character
+			-- If no knife exists yet, keep waiting and retrying rather than ending the loop
 			if not knife then
-				isMurdererLoopRunning = false
-				break
+				task.wait(0.1)
+				continue
 			end
 
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			local root = char:FindFirstChild("HumanoidRootPart")
 
-			-- Equip knife if it's in the backpack
-			if knife.Parent == backpack and humanoid then
-				humanoid:EquipTool(knife)
+			-- Automatically equip knife if it's currently in Backpack
+			if backpack and knife.Parent == backpack and humanoid and humanoid.Health > 0 then
+				pcall(function()
+					humanoid:EquipTool(knife)
+				end)
+				task.wait(0.05)
 			end
 
 			-- Bring and activate knife on non-restricted players
@@ -359,6 +363,7 @@ local function runMurdererLogic()
 
 							if targetRoot and targetHum and targetHum.Health > 0 then
 								pcall(function()
+									-- Teleport target right in front of LocalPlayer and swing
 									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
 									knife:Activate()
 								end)
@@ -368,7 +373,7 @@ local function runMurdererLogic()
 				end
 			end
 
-			task.wait(0.05)
+			task.wait(0.03)
 		end
 	end)
 end
