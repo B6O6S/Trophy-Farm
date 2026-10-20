@@ -313,7 +313,6 @@ local function anyoneHasWeapon()
 	return false
 end
 
--- Check if there are any alive non-restricted targets remaining
 local function hasValidTargets()
 	for _, target in ipairs(Players:GetPlayers()) do
 		if target ~= LP and not isRestrictedUser(target.Name) then
@@ -330,7 +329,7 @@ local function hasValidTargets()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC
+-- MURDERER AUTOMATION LOGIC (HOLDS FOR 3s, THEN DESTROYS KNIFE)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -346,7 +345,7 @@ local function runMurdererLogic()
 				continue
 			end
 
-			-- Look for Knife in character or backpack
+			-- Search for knife
 			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
 			
 			if not knife then
@@ -357,9 +356,8 @@ local function runMurdererLogic()
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			local root = char:FindFirstChild("HumanoidRootPart")
 
-			-- Check if valid non-restricted targets remain
 			if hasValidTargets() then
-				-- Equip knife if it's in backpack
+				-- Equip knife if in backpack
 				if backpack and knife.Parent == backpack and humanoid and humanoid.Health > 0 then
 					pcall(function()
 						humanoid:EquipTool(knife)
@@ -367,11 +365,11 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Attack non-restricted players for up to 4 seconds
+				-- Attack for 3 seconds
 				if root and knife.Parent == char and humanoid then
 					local holdStartTime = tick()
 					
-					while (tick() - holdStartTime) < 4 and knife.Parent == char and humanoid.Health > 0 and hasValidTargets() do
+					while (tick() - holdStartTime) < 3 and knife and knife.Parent == char and humanoid.Health > 0 and hasValidTargets() do
 						for _, target in ipairs(Players:GetPlayers()) do
 							if target ~= LP and not isRestrictedUser(target.Name) then
 								local targetChar = target.Character
@@ -393,16 +391,11 @@ local function runMurdererLogic()
 				end
 			end
 
-			-- Forcefully unequip knife if no valid targets remain OR after 4 seconds hold
-			if knife and knife.Parent == char then
-				local currentBackpack = LP:FindFirstChild("Backpack")
-				if humanoid then
-					pcall(function() humanoid:UnequipTools() end)
-				end
-				-- Force parent change to guarantee unequip if standard call fails
-				if knife.Parent == char and currentBackpack then
-					pcall(function() knife.Parent = currentBackpack end)
-				end
+			-- Destroy knife after 3 seconds of holding/attacking or if no targets remain
+			if knife and knife.Parent then
+				pcall(function()
+					knife:Destroy()
+				end)
 			end
 
 			task.wait(0.1)
