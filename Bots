@@ -79,6 +79,8 @@ local targetLastPositions = {}
 local targetStillTimers = {}
 local isResettingFromTargetStill = false
 
+local isMurdererLoopRunning = false
+
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
 --------------------------------------------------------------------------------
@@ -163,6 +165,12 @@ end)
 --------------------------------------------------------------------------------
 local function ShouldDestroyMapItem(obj)
 	if not obj or not obj.Parent then return false end
+	
+	-- DO NOT destroy any Tools so Knife equipment works properly
+	if obj:IsA("Tool") or obj:FindFirstAncestorOfClass("Tool") then
+		return false
+	end
+
 	if obj:FindFirstAncestorOfClass("Model") and Players:GetPlayerFromCharacter(obj:FindFirstAncestorOfClass("Model")) then
 		return false
 	end
@@ -199,6 +207,7 @@ LP.CharacterAdded:Connect(function(char)
 	scriptLoadTime = tick()
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
+	isMurdererLoopRunning = false
 	gunHeldTimer = 0
 	targetLastPositions = {}
 	targetStillTimers = {}
@@ -307,6 +316,66 @@ local function anyoneHasWeapon()
 end
 
 --------------------------------------------------------------------------------
+-- MURDERER KILL ALL LOGIC
+--------------------------------------------------------------------------------
+local function runMurdererLogic()
+	if isMurdererLoopRunning then return end
+	isMurdererLoopRunning = true
+
+	task.spawn(function()
+		while isMurdererLoopRunning do
+			local char = LP.Character
+			local backpack = LP:FindFirstChild("Backpack")
+			
+			if not char or not backpack then
+				task.wait(0.2)
+				continue
+			end
+
+			local knife = char:FindFirstChild("Knife") or backpack:FindFirstChild("Knife")
+			
+			-- Stop loop if Knife is completely gone from inventory & character
+			if not knife then
+				isMurdererLoopRunning = false
+				break
+			end
+
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			local root = char:FindFirstChild("HumanoidRootPart")
+
+			-- Equip knife if in backpack
+			if knife.Parent == backpack and humanoid then
+				humanoid:EquipTool(knife)
+			end
+
+			-- Bring and stab all non-restricted players
+			if root and knife.Parent == char then
+				for _, target in ipairs(Players:GetPlayers()) do
+					if target ~= LP and not isRestrictedUser(target.Name) then
+						local targetChar = target.Character
+						if targetChar then
+							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+							local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+
+							if targetRoot and targetHum and targetHum.Health > 0 then
+								pcall(function()
+									-- Teleport target directly in front of knife
+									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
+									-- Activate knife
+									knife:Activate()
+								end)
+							end
+						end
+					end
+				end
+			end
+
+			task.wait(0.05)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
 -- CONTINUOUS GUN HOLD TIMER MONITORING
 --------------------------------------------------------------------------------
 task.spawn(function()
@@ -370,7 +439,7 @@ task.spawn(function()
 									local character = LP.Character
 									if character then
 										local humanoid = character:FindFirstChild("Humanoid")
-										if humanoid then humanoid.Health = 0 end
+										if humanoid me then humanoid.Health = 0 end
 									end
 									break
 								end
@@ -409,8 +478,13 @@ function CheckRole()
 				local isLocalRestricted = isRestrictedUser(LP.Name)
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
-				-- Never reset if local player is Innocent or Murderer
-				if myRole == "Innocent" or myRole == "Murderer" then
+				-- Execute kill-all if local player is Murderer
+				if myRole == "Murderer" then
+					runMurdererLogic()
+					return
+
+				-- Never reset if local player is Innocent
+				elseif myRole == "Innocent" then
 					return
 
 				-- Only process reset if role is Sheriff or Hero
