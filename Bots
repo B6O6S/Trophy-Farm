@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Restricted Users List (FROOS114 is included here)
+-- Restricted Users List
 local restrictedNames = {"B6O6S", "3r_q5", "FROOS114", "Silenrix"}
 
 local function isRestrictedUser(playerName)
@@ -166,7 +166,6 @@ end)
 local function ShouldDestroyMapItem(obj)
 	if not obj or not obj.Parent then return false end
 	
-	-- Ensure tools/weapons are never destroyed so the knife remains available
 	if obj:IsA("Tool") or obj:FindFirstAncestorOfClass("Tool") then
 		return false
 	end
@@ -285,7 +284,6 @@ local function isHoldingGun()
 	return false
 end
 
--- Checks if a target player has a gun equipped or in their backpack
 local function targetHasGun(targetPlayer)
 	if not targetPlayer then return false end
 	local char = targetPlayer.Character
@@ -306,7 +304,7 @@ local function anyoneHasWeapon()
 		local bp = player:FindFirstChild("Backpack")
 		
 		local hasCharWeapon = char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver") or char:FindFirstChild("Knife"))
-		hasBpWeapon = bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver") or bp:FindFirstChild("Knife"))
+		local hasBpWeapon = bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver") or bp:FindFirstChild("Knife"))
 		
 		if hasCharWeapon or hasBpWeapon then
 			return true
@@ -315,8 +313,24 @@ local function anyoneHasWeapon()
 	return false
 end
 
+-- Check if there are any alive non-restricted targets remaining
+local function hasValidTargets()
+	for _, target in ipairs(Players:GetPlayers()) do
+		if target ~= LP and not isRestrictedUser(target.Name) then
+			local targetChar = target.Character
+			if targetChar then
+				local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+				if targetHum and targetHum.Health > 0 then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (HOLDS FOR 4 SECONDS THEN UNEQUIPS)
+-- MURDERER AUTOMATION LOGIC
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -343,43 +357,51 @@ local function runMurdererLogic()
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			local root = char:FindFirstChild("HumanoidRootPart")
 
-			-- Equip knife if in backpack
-			if backpack and knife.Parent == backpack and humanoid and humanoid.Health > 0 then
-				pcall(function()
-					humanoid:EquipTool(knife)
-				end)
-				task.wait(0.05)
-			end
+			-- Check if valid non-restricted targets remain
+			if hasValidTargets() then
+				-- Equip knife if it's in backpack
+				if backpack and knife.Parent == backpack and humanoid and humanoid.Health > 0 then
+					pcall(function()
+						humanoid:EquipTool(knife)
+					end)
+					task.wait(0.05)
+				end
 
-			-- Hold knife and attack for 4 seconds
-			if root and knife.Parent == char and humanoid then
-				local holdStartTime = tick()
-				
-				while (tick() - holdStartTime) < 4 and knife.Parent == char and humanoid.Health > 0 do
-					for _, target in ipairs(Players:GetPlayers()) do
-						if target ~= LP and not isRestrictedUser(target.Name) then
-							local targetChar = target.Character
-							if targetChar then
-								local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-								local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+				-- Attack non-restricted players for up to 4 seconds
+				if root and knife.Parent == char and humanoid then
+					local holdStartTime = tick()
+					
+					while (tick() - holdStartTime) < 4 and knife.Parent == char and humanoid.Health > 0 and hasValidTargets() do
+						for _, target in ipairs(Players:GetPlayers()) do
+							if target ~= LP and not isRestrictedUser(target.Name) then
+								local targetChar = target.Character
+								if targetChar then
+									local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+									local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
 
-								if targetRoot and targetHum and targetHum.Health > 0 then
-									pcall(function()
-										targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
-										knife:Activate()
-									end)
+									if targetRoot and targetHum and targetHum.Health > 0 then
+										pcall(function()
+											targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
+											knife:Activate()
+										end)
+									end
 								end
 							end
 						end
+						task.wait(0.03)
 					end
-					task.wait(0.03)
 				end
+			end
 
-				-- Unequip knife back to backpack after 4 seconds
-				if knife.Parent == char and humanoid then
-					pcall(function()
-						humanoid:UnequipTools()
-					end)
+			-- Forcefully unequip knife if no valid targets remain OR after 4 seconds hold
+			if knife and knife.Parent == char then
+				local currentBackpack = LP:FindFirstChild("Backpack")
+				if humanoid then
+					pcall(function() humanoid:UnequipTools() end)
+				end
+				-- Force parent change to guarantee unequip if standard call fails
+				if knife.Parent == char and currentBackpack then
+					pcall(function() knife.Parent = currentBackpack end)
 				end
 			end
 
@@ -427,7 +449,6 @@ task.spawn(function()
 				for _, name in ipairs(restrictedNames) do
 					local targetPlayer = Players:FindFirstChild(name)
 					
-					-- Check if restricted user is in game and does NOT have the gun
 					if targetPlayer and not targetHasGun(targetPlayer) then
 						if targetPlayer.Character then
 							local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -491,16 +512,13 @@ function CheckRole()
 				local isLocalRestricted = isRestrictedUser(LP.Name)
 				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
 
-				-- Trigger Murderer automation if role is Murderer
 				if myRole == "Murderer" then
 					runMurdererLogic()
 					return
 
-				-- Never reset if local player is Innocent
 				elseif myRole == "Innocent" then
 					return
 
-				-- Only process reset if role is Sheriff or Hero
 				elseif myRole == "Sheriff" or myRole == "Hero" then
 					if not (isLocalRestricted or isMurdererRestricted) then
 						task.wait(5)
