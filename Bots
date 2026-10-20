@@ -306,7 +306,7 @@ local function anyoneHasWeapon()
 		local bp = player:FindFirstChild("Backpack")
 		
 		local hasCharWeapon = char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver") or char:FindFirstChild("Knife"))
-		local hasBpWeapon = bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver") or bp:FindFirstChild("Knife"))
+		hasBpWeapon = bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver") or bp:FindFirstChild("Knife"))
 		
 		if hasCharWeapon or hasBpWeapon then
 			return true
@@ -316,7 +316,7 @@ local function anyoneHasWeapon()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (UPDATED & ROBUST)
+-- MURDERER AUTOMATION LOGIC (HOLDS FOR 4 SECONDS THEN UNEQUIPS)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -335,7 +335,6 @@ local function runMurdererLogic()
 			-- Look for Knife in character or backpack
 			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
 			
-			-- If no knife exists yet, keep waiting and retrying rather than ending the loop
 			if not knife then
 				task.wait(0.1)
 				continue
@@ -344,7 +343,7 @@ local function runMurdererLogic()
 			local humanoid = char:FindFirstChildOfClass("Humanoid")
 			local root = char:FindFirstChild("HumanoidRootPart")
 
-			-- Automatically equip knife if it's currently in Backpack
+			-- Equip knife if in backpack
 			if backpack and knife.Parent == backpack and humanoid and humanoid.Health > 0 then
 				pcall(function()
 					humanoid:EquipTool(knife)
@@ -352,28 +351,39 @@ local function runMurdererLogic()
 				task.wait(0.05)
 			end
 
-			-- Bring and activate knife on non-restricted players
-			if root and knife.Parent == char then
-				for _, target in ipairs(Players:GetPlayers()) do
-					if target ~= LP and not isRestrictedUser(target.Name) then
-						local targetChar = target.Character
-						if targetChar then
-							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-							local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+			-- Hold knife and attack for 4 seconds
+			if root and knife.Parent == char and humanoid then
+				local holdStartTime = tick()
+				
+				while (tick() - holdStartTime) < 4 and knife.Parent == char and humanoid.Health > 0 do
+					for _, target in ipairs(Players:GetPlayers()) do
+						if target ~= LP and not isRestrictedUser(target.Name) then
+							local targetChar = target.Character
+							if targetChar then
+								local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+								local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
 
-							if targetRoot and targetHum and targetHum.Health > 0 then
-								pcall(function()
-									-- Teleport target right in front of LocalPlayer and swing
-									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
-									knife:Activate()
-								end)
+								if targetRoot and targetHum and targetHum.Health > 0 then
+									pcall(function()
+										targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
+										knife:Activate()
+									end)
+								end
 							end
 						end
 					end
+					task.wait(0.03)
+				end
+
+				-- Unequip knife back to backpack after 4 seconds
+				if knife.Parent == char and humanoid then
+					pcall(function()
+						humanoid:UnequipTools()
+					end)
 				end
 			end
 
-			task.wait(0.03)
+			task.wait(0.1)
 		end
 	end)
 end
