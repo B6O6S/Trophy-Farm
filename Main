@@ -21,8 +21,6 @@ if existingGui then
 	return
 end
 
-pcall(function() setfpscap(30) end)
-
 pcall(function()
 	Lighting.GlobalShadows = false
 	Lighting.FogEnd = 9e9
