@@ -352,88 +352,35 @@ local function isRestrictedUserNearby(distanceThreshold)
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (2s HOLD, 15-STUD PROXIMITY SAFETY CHECK)
+-- MURDERER AUTOMATION LOGIC (WAIT 5s THEN TP TO 620, 562, 35)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
 	isMurdererLoopRunning = true
 
 	task.spawn(function()
+		-- Wait 5 seconds after becoming Murderer
+		task.wait(5)
+
+		local targetCFrame = CFrame.new(620, 562, 35)
+
+		-- Loop to teleport and maintain position until character dies or respawns
 		while isMurdererLoopRunning do
 			local char = LP.Character
-			local backpack = LP:FindFirstChild("Backpack")
-			
-			if not char then
-				task.wait(0.1)
-				continue
-			end
+			if char then
+				local root = char:FindFirstChild("HumanoidRootPart")
+				local hum = char:FindFirstChildOfClass("Humanoid")
 
-			-- Search for knife
-			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
-			
-			if not knife then
-				task.wait(0.1)
-				continue
-			end
-
-			local humanoid = char:FindFirstChildOfClass("Humanoid")
-			local root = char:FindFirstChild("HumanoidRootPart")
-
-			-- Immediate destruction if a restricted user is within 15 studs before doing anything
-			if isRestrictedUserNearby(15) then
-				pcall(function() knife:Destroy() end)
-				task.wait(0.2)
-				continue
-			end
-
-			if hasValidTargets() then
-				-- Equip knife if in backpack
-				if backpack and knife.Parent == backpack and humanoid and humanoid.Health > 0 then
+				if root and hum and hum.Health > 0 then
 					pcall(function()
-						humanoid:EquipTool(knife)
+						root.CFrame = targetCFrame
 					end)
-					task.wait(0.05)
+				else
+					break
 				end
-
-				-- Attack for up to 2 seconds
-				if root and knife.Parent == char and humanoid then
-					local holdStartTime = tick()
-					
-					while (tick() - holdStartTime) < 2 and knife and knife.Parent == char and humanoid.Health > 0 and hasValidTargets() do
-						-- Safety Check: Immediately destroy knife if a restricted player gets within 15 studs
-						if isRestrictedUserNearby(15) then
-							pcall(function() knife:Destroy() end)
-							break
-						end
-
-						for _, target in ipairs(Players:GetPlayers()) do
-							if target ~= LP and not isRestrictedUser(target.Name) then
-								local targetChar = target.Character
-								if targetChar then
-									local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-									local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-
-									if targetRoot and targetHum and targetHum.Health > 0 then
-										pcall(function()
-											targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
-											knife:Activate()
-										end)
-									end
-								end
-							end
-						end
-						task.wait(0.03)
-					end
-				end
+			else
+				break
 			end
-
-			-- Destroy knife after 2 seconds of holding/attacking, if a restricted player got close, or if no targets remain
-			if knife and knife.Parent then
-				pcall(function()
-					knife:Destroy()
-				end)
-			end
-
 			task.wait(0.1)
 		end
 	end)
