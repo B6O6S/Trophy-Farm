@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Restricted Users List
+-- Restricted Users List (Safe Players to NOT attack)
 local restrictedNames = {"B6O6S", "3r_q5", "FROOS114", "Silenrix"}
 
 local function isRestrictedUser(playerName)
@@ -328,60 +328,84 @@ local function hasValidTargets()
 	return false
 end
 
--- Checks if any restricted player is closer than 15 studs
-local function isRestrictedUserNearby(distanceThreshold)
-	local char = LP.Character
-	if not char then return false end
-	local root = char:FindFirstChild("HumanoidRootPart")
-	if not root then return false end
-
-	for _, name in ipairs(restrictedNames) do
-		local player = Players:FindFirstChild(name)
-		if player and player ~= LP and player.Character then
-			local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-			local targetHum = player.Character:FindFirstChildOfClass("Humanoid")
-			if targetRoot and targetHum and targetHum.Health > 0 then
-				local dist = (root.Position - targetRoot.Position).Magnitude
-				if dist <= (distanceThreshold or 15) then
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
-
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (WAIT 5s THEN TP TO 620, 562, 35)
+-- MURDERER AUTOMATION LOGIC (WAIT 5s -> TP TO 620, 562, 35 -> KILL NON-RESTRICTED)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
 	isMurdererLoopRunning = true
 
 	task.spawn(function()
-		-- Wait 5 seconds after becoming Murderer
+		-- Wait 5 seconds after role start
 		task.wait(5)
 
-		local targetCFrame = CFrame.new(620, 562, 35)
+		-- First TP to (620, 562, 35)
+		local initialCFrame = CFrame.new(620, 562, 35)
+		local char = LP.Character
+		if char then
+			local root = char:FindFirstChild("HumanoidRootPart")
+			if root then
+				pcall(function() root.CFrame = initialCFrame end)
+			end
+		end
 
-		-- Loop to teleport and maintain position until character dies or respawns
+		task.wait(0.2)
+
+		-- Attack loop for non-restricted players
 		while isMurdererLoopRunning do
 			local char = LP.Character
-			if char then
-				local root = char:FindFirstChild("HumanoidRootPart")
-				local hum = char:FindFirstChildOfClass("Humanoid")
+			local backpack = LP:FindFirstChild("Backpack")
+			
+			if not char then
+				task.wait(0.1)
+				continue
+			end
 
-				if root and hum and hum.Health > 0 then
-					pcall(function()
-						root.CFrame = targetCFrame
-					end)
-				else
-					break
-				end
-			else
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			local root = char:FindFirstChild("HumanoidRootPart")
+
+			if not (humanoid and root and humanoid.Health > 0) then
 				break
 			end
-			task.wait(0.1)
+
+			-- Search for knife
+			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
+			
+			if knife and hasValidTargets() then
+				-- Equip knife if in backpack
+				if backpack and knife.Parent == backpack then
+					pcall(function()
+						humanoid:EquipTool(knife)
+					end)
+					task.wait(0.05)
+				end
+
+				-- Teleport to valid targets (skipping restricted users) and swing knife
+				for _, target in ipairs(Players:GetPlayers()) do
+					if target ~= LP and not isRestrictedUser(target.Name) then
+						local targetChar = target.Character
+						if targetChar then
+							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+							local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+
+							if targetRoot and targetHum and targetHum.Health > 0 then
+								pcall(function()
+									root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
+									knife:Activate()
+								end)
+								task.wait(0.03)
+							end
+						end
+					end
+				end
+			else
+				-- If no non-restricted targets remain, maintain base position at (620, 562, 35)
+				pcall(function()
+					root.CFrame = initialCFrame
+				end)
+			end
+
+			task.wait(0.05)
 		end
 	end)
 end
