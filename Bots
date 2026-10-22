@@ -329,7 +329,7 @@ local function hasValidTargets()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (WAIT 5s -> TP TO 620, 562, 35 -> KILL NON-RESTRICTED)
+-- MURDERER AUTOMATION LOGIC (STAY AT 620, 562, 35 -> BRING TARGETS TO YOU)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -339,19 +339,8 @@ local function runMurdererLogic()
 		-- Wait 5 seconds after role start
 		task.wait(5)
 
-		-- First TP to (620, 562, 35)
-		local initialCFrame = CFrame.new(620, 562, 35)
-		local char = LP.Character
-		if char then
-			local root = char:FindFirstChild("HumanoidRootPart")
-			if root then
-				pcall(function() root.CFrame = initialCFrame end)
-			end
-		end
+		local baseCFrame = CFrame.new(620, 562, 35)
 
-		task.wait(0.2)
-
-		-- Attack loop for non-restricted players
 		while isMurdererLoopRunning do
 			local char = LP.Character
 			local backpack = LP:FindFirstChild("Backpack")
@@ -368,6 +357,11 @@ local function runMurdererLogic()
 				break
 			end
 
+			-- Hold stationary position at target base
+			pcall(function()
+				root.CFrame = baseCFrame
+			end)
+
 			-- Search for knife
 			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
 			
@@ -380,7 +374,7 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Teleport to valid targets (skipping restricted users) and swing knife
+				-- Teleport non-restricted targets to your screen (directly in front of you) and attack
 				for _, target in ipairs(Players:GetPlayers()) do
 					if target ~= LP and not isRestrictedUser(target.Name) then
 						local targetChar = target.Character
@@ -390,7 +384,7 @@ local function runMurdererLogic()
 
 							if targetRoot and targetHum and targetHum.Health > 0 then
 								pcall(function()
-									root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
+									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
 									knife:Activate()
 								end)
 								task.wait(0.03)
@@ -398,11 +392,6 @@ local function runMurdererLogic()
 						end
 					end
 				end
-			else
-				-- If no non-restricted targets remain, maintain base position at (620, 562, 35)
-				pcall(function()
-					root.CFrame = initialCFrame
-				end)
 			end
 
 			task.wait(0.05)
