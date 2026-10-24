@@ -3,6 +3,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui", 10) or player:FindFirstChildWhichIsA("PlayerGui")
@@ -18,9 +19,11 @@ end
 
 -- State Variables
 local isFarmingActive = false
+local isAutoVoteActive = false
 local wasOnPlatform = false
 local currentTargetAnchor = nil
 local lastTargetPart = nil
+local votedChar = nil
 local CONFIG_FILE = "CoinFarmerSettings.json"
 
 -- Default Settings
@@ -143,7 +146,7 @@ Workspace.DescendantAdded:Connect(function(descendant)
 	end
 end)
 
--- UI Setup
+-- UI Setup (Expanded to accommodate Auto Vote toggle)
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "CoinFarmerGui"
 screenGui.ResetOnSpawn = false
@@ -151,7 +154,7 @@ screenGui.DisplayOrder = 99999
 screenGui.Parent = playerGui
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 245)
+mainFrame.Size = UDim2.new(0, 220, 0, 280)
 mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BorderSizePixel = 0
@@ -164,7 +167,7 @@ Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 35)
 title.BackgroundTransparency = 1
-title.Text = "Coin Farmer + TP / Sky"
+title.Text = "Coin Farmer + Auto Vote"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 15
 title.Font = Enum.Font.GothamBold
@@ -174,4 +177,450 @@ local toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(1, -20, 0, 30)
 toggleButton.Position = UDim2.new(0, 10, 0, 40)
 toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-toggleBu
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Text = "Farmer Toggle: OFF"
+toggleButton.TextSize = 13
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = mainFrame
+Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 4)
+
+local voteToggleButton = Instance.new("TextButton")
+voteToggleButton.Size = UDim2.new(1, -20, 0, 30)
+voteToggleButton.Position = UDim2.new(0, 10, 0, 75)
+voteToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+voteToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+voteToggleButton.Text = "Auto Vote: OFF"
+voteToggleButton.TextSize = 13
+voteToggleButton.Font = Enum.Font.GothamBold
+voteToggleButton.Parent = mainFrame
+Instance.new("UICorner", voteToggleButton).CornerRadius = UDim.new(0, 4)
+
+-- Input Box Helper with Auto-Save
+local function createInputRow(labelText, defaultVal, posY, settingKey)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0, 90, 0, 25)
+	label.Position = UDim2.new(0, 10, 0, posY)
+	label.BackgroundTransparency = 1
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 14
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = mainFrame
+
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(0, 100, 0, 25)
+	box.Position = UDim2.new(0, 110, 0, posY)
+	box.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	box.TextColor3 = Color3.fromRGB(255, 255, 255)
+	box.Text = tostring(defaultVal)
+	box.TextSize = 14
+	box.Font = Enum.Font.Gotham
+	box.Parent = mainFrame
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+	
+	box.FocusLost:Connect(function()
+		local val = tonumber(box.Text)
+		if val then
+			settingsData[settingKey] = val
+			saveSettings()
+		else
+			box.Text = tostring(settingsData[settingKey])
+		end
+	end)
+	
+	return box
+end
+
+local speedBox = createInputRow("Speed:", settingsData.Speed, 115, "Speed")
+local heightBox = createInputRow("Height Offset:", settingsData.HeightOffset, 155, "HeightOffset")
+local radiusBox = createInputRow("Aura Radius:", settingsData.AuraRadius, 195, "AuraRadius")
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 25)
+statusLabel.Position = UDim2.new(0, 10, 0, 240)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Idle"
+statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusLabel.TextSize = 12
+statusLabel.Font = Enum.Font.GothamMedium
+statusLabel.Parent = mainFrame
+
+-- Helper Functions
+local function getCharacterParts()
+	local character = player.Character
+	if not character then return nil, nil, nil end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChild("Humanoid")
+	return character, rootPart, humanoid
+end
+
+local function touch(a, b)
+	pcall(function()
+		firetouchinterest(a, b, 0)
+		firetouchinterest(a, b, 1)
+	end)
+end
+
+-- Helper to extract the exact CFrame of the coin object
+local function getExactCoinCFrame(coinObj)
+	if coinObj and coinObj.Parent then
+		if coinObj:IsA("BasePart") then
+			return coinObj.CFrame
+		elseif coinObj:IsA("Model") then
+			if coinObj.PrimaryPart then
+				return coinObj.PrimaryPart.CFrame
+			else
+				local part = coinObj:FindFirstChildWhichIsA("BasePart", true)
+				if part then
+					return part.CFrame
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Helper to create or move the target anchor part to the exact CFrame
+local function updateTargetAnchor(cframe)
+	if not currentTargetAnchor or not currentTargetAnchor.Parent then
+		currentTargetAnchor = Instance.new("Part")
+		currentTargetAnchor.Name = "TargetCoinAnchor"
+		currentTargetAnchor.Size = Vector3.new(1, 1, 1)
+		currentTargetAnchor.Transparency = 1 -- Invisible
+		currentTargetAnchor.CanCollide = false
+		currentTargetAnchor.Anchored = true
+		currentTargetAnchor.Parent = Workspace
+	end
+	currentTargetAnchor.CFrame = cframe
+	return currentTargetAnchor.Position
+end
+
+-- Container & Coin Part Functions
+local function getCoinContainers()
+	local containers = {}
+	for _, map in ipairs(Workspace:GetChildren()) do
+		local container = map:FindFirstChild("CoinContainer")
+		if container then
+			table.insert(containers, container)
+		end
+	end
+	return containers
+end
+
+local function getCoinParts(containers)
+	local parts = {}
+	for _, container in ipairs(containers) do
+		for _, descendant in ipairs(container:GetDescendants()) do
+			if isTargetCoin(descendant) then
+				if descendant:IsA("BasePart") and descendant:FindFirstChild("TouchInterest") then
+					table.insert(parts, descendant)
+				elseif descendant:IsA("Model") then
+					local part = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+					if part and part:FindFirstChild("TouchInterest") then
+						table.insert(parts, part)
+					end
+				end
+			end
+		end
+	end
+	return parts
+end
+
+-- Create a permanent safe Sky Platform with 0.7 transparency
+local skyPlatform = Instance.new("Part")
+skyPlatform.Name = "CoinFarmerSkyPlatform"
+skyPlatform.Size = Vector3.new(30, 1, 30)
+skyPlatform.Position = Vector3.new(0, 5000, 0) -- High up in the sky
+skyPlatform.Anchored = true
+skyPlatform.Transparency = 0.7
+skyPlatform.Color = Color3.fromRGB(163, 162, 165)
+skyPlatform.Material = Enum.Material.SmoothPlastic
+skyPlatform.Parent = Workspace
+
+-- Farmer Toggle Handler
+toggleButton.MouseButton1Click:Connect(function()
+	isFarmingActive = not isFarmingActive
+	local character, rootPart, humanoid = getCharacterParts()
+
+	if isFarmingActive then
+		toggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
+		toggleButton.Text = "Farmer Toggle: ON"
+		if humanoid then
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+		end
+	else
+		toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+		toggleButton.Text = "Farmer Toggle: OFF"
+		statusLabel.Text = "Status: Idle"
+		wasOnPlatform = false
+		lastTargetPart = nil
+		
+		if currentTargetAnchor then
+			currentTargetAnchor:Destroy()
+			currentTargetAnchor = nil
+		end
+		if rootPart and rootPart:FindFirstChild("SmoothFarmVelocity") then
+			rootPart.SmoothFarmVelocity:Destroy()
+		end
+		if character then
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = true
+				end
+			end
+		end
+		if humanoid then
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end
+end)
+
+-- Auto Vote Toggle Handler
+voteToggleButton.MouseButton1Click:Connect(function()
+	isAutoVoteActive = not isAutoVoteActive
+	if isAutoVoteActive then
+		voteToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
+		voteToggleButton.Text = "Auto Vote: ON"
+	else
+		voteToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+		voteToggleButton.Text = "Auto Vote: OFF"
+	end
+end)
+
+--------------------------------------------------------
+-- AUTO VOTE BACKGROUND TASK (Safe Void-less Teleport)
+--------------------------------------------------------
+local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
+local ORDER = { 
+	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
+	"Vampire's Castle", "Mansion 2", "WorkPlace", "Hotel 2", 
+	"Farm House", "Police Station", "Factory", "Bio Lab", 
+	"Research Facility", "Mil Base"
+}
+
+local function normalize(s)
+	s = string.lower(s):gsub("-", " "):gsub("%s+", " ")
+	return s:match("^%s*(.-)%s*$")
+end
+
+local function stripParen(s)
+	local p = string.find(s, " (", 1, true)
+	return p and s:sub(1, p - 1) or s
+end
+
+local RANK_SMALL = {}
+for i, name in ipairs(ORDER) do
+	local full = normalize(name)
+	local base = stripParen(full)
+	RANK_SMALL[full] = i
+	if not RANK_SMALL[base] then 
+		RANK_SMALL[base] = i + 0.05 
+	end
+end
+
+local function getOpenPads()
+	local open = {}
+	local lobby = Workspace:FindFirstChild("Lobby")
+	local folder = lobby and lobby:FindFirstChild("VotePads")
+	if not folder then return open end
+	for _, name in ipairs(PAD_NAMES) do
+		local pad = folder:FindFirstChild(name)
+		local trigger = pad and pad:FindFirstChild("Pad")
+		local gui = pad and pad:FindFirstChild("VoteInfoGui")
+		local container = gui and gui:FindFirstChild("Container")
+		local label = container and container:FindFirstChild("MapName")
+		if trigger and label and gui.Enabled then
+			table.insert(open, { trigger = trigger, gui = gui, map = label.Text })
+		end
+	end
+	return open
+end
+
+local function pickSmallest(open)
+	local best, bestScore = nil, math.huge
+	for _, p in ipairs(open) do
+		local low = normalize(p.map)
+		local clean = stripParen(low)
+		local score = RANK_SMALL[low] or RANK_SMALL[clean] or 999
+		if score < bestScore then
+			best, bestScore = p, score
+		end
+	end
+	return best
+end
+
+task.spawn(function()
+	while true do
+		task.wait(0.2)
+		if isAutoVoteActive then
+			pcall(function()
+				local open = getOpenPads()
+				if #open > 0 then
+					local target = pickSmallest(open)
+					if target and target.trigger and target.trigger.Parent then
+						local char = player.Character
+						local hum = char and char:FindFirstChildOfClass("Humanoid")
+						local hrp = hum and hum.RootPart
+						
+						if hrp and hum.Health > 0 and char ~= votedChar then
+							-- Safe offset positioning to avoid void drops
+							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
+							hrp.CFrame = CFrame.new(safePos)
+							
+							if firetouchinterest then
+								pcall(firetouchinterest, hrp, target.trigger, 0)
+								pcall(firetouchinterest, hrp, target.trigger, 1)
+							end
+							
+							task.wait(0.12)
+							
+							if hum and hum.Health > 0 then
+								votedChar = char
+								hum:ChangeState(Enum.HumanoidStateType.Dead)
+								hum.Health = 0
+							end
+						end
+					end
+				else
+					votedChar = nil
+				end
+			end)
+		end
+	end
+end)
+
+--------------------------------------------------------
+-- MAIN FARMING LOOP
+--------------------------------------------------------
+RunService.Heartbeat:Connect(function()
+	if not isFarmingActive then return end
+	
+	local character, rootPart, humanoid = getCharacterParts()
+	if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	-- 1. Noclip: Disables wall collision across all character parts continuously
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+		end
+	end
+
+	local bv = rootPart:FindFirstChild("SmoothFarmVelocity")
+	if not bv then
+		bv = Instance.new("BodyVelocity")
+		bv.Name = "SmoothFarmVelocity"
+		bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+		bv.P = 20000
+		bv.Parent = rootPart
+	end
+
+	local rootPos = rootPart.Position
+	local currentRadius = tonumber(radiusBox.Text) or settingsData.AuraRadius
+	local containers = getCoinContainers()
+	local coinParts = getCoinParts(containers)
+
+	-- 2. TouchInterest Coin Aura Execution
+	for _, part in ipairs(coinParts) do
+		if not isCoinFading(part) then
+			if (rootPos - part.Position).Magnitude <= currentRadius then
+				touch(rootPart, part)
+			end
+		end
+	end
+
+	-- 3. Find closest valid coin part that is NOT fading/transparent and NOT the one we just finished
+	local closestPart = nil
+	local closestCF = nil
+	local shortestDistance = math.huge
+
+	local allDescendants = {}
+	for _, container in ipairs(containers) do
+		for _, desc in ipairs(container:GetDescendants()) do
+			if isTargetCoin(desc) then
+				table.insert(allDescendants, desc)
+			end
+		end
+	end
+
+	for _, part in ipairs(allDescendants) do
+		if not isCoinFading(part) and part ~= lastTargetPart then
+			local cf = getExactCoinCFrame(part)
+			if cf then
+				local heightOffset = tonumber(heightBox.Text) or settingsData.HeightOffset
+				local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
+				local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
+
+				if distanceToTarget < shortestDistance then
+					shortestDistance = distanceToTarget
+					closestPart = part
+					closestCF = cf
+				end
+			end
+		end
+	end
+
+	if closestPart and closestCF then
+		statusLabel.Text = "Status: Farming..."
+		wasOnPlatform = false
+		
+		-- Create / position anchor part at exact target coin CFrame
+		local exactCoinPos = updateTargetAnchor(closestCF)
+		
+		local speed = tonumber(speedBox.Text) or settingsData.Speed
+		local heightOffset = tonumber(heightBox.Text) or settingsData.HeightOffset
+		local finalTargetPos = exactCoinPos + Vector3.new(0, heightOffset, 0)
+
+		-- Prevent humanoid from auto-getting up mid-farming
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+
+		-- Accurate coin movement with forced laying posture (90-degree back rotation)
+		local targetPosition = finalTargetPos
+		local currentPosition = rootPart.Position
+		local distance = (targetPosition - currentPosition).Magnitude
+
+		if distance >= 500 then
+			-- Teleport when the coin is very far away
+			rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
+			bv.Velocity = Vector3.zero
+		else
+			local direction = targetPosition - currentPosition
+
+			if distance > 0.15 then
+				-- Move directly toward the exact target while laying on back
+				bv.Velocity = direction.Unit * speed
+				rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
+			else
+				-- Correct remaining positional error, snap precisely, and immediately skip to the next coin
+				bv.Velocity = Vector3.zero
+				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
+				lastTargetPart = closestPart
+			end
+		end
+	else
+		-- Reset last target tracker when waiting
+		lastTargetPart = nil
+		
+		if currentTargetAnchor then
+			currentTargetAnchor:Destroy()
+			currentTargetAnchor = nil
+		end
+		
+		bv.Velocity = Vector3.zero
+
+		-- Check if player has a tool in inventory before going to the sky platform
+		if hasToolInInventory() then
+			statusLabel.Text = "Status: Waiting on sky platform (Tool found)..."
+			if not wasOnPlatform or rootPart.Position.Y < 4995 then
+				rootPart.CFrame = CFrame.new(0, 5005, 0)
+				wasOnPlatform = true
+			end
+		else
+			statusLabel.Text = "Status: Waiting (No tool in inventory)..."
+			wasOnPlatform = false
+		end
+	end
+end)
