@@ -470,7 +470,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------
--- MAIN FARMING LOOP (No Platform Teleporting)
+-- MAIN FARMING LOOP (Instant First Spawn TP & Fast Skip)
 --------------------------------------------------------
 RunService.Heartbeat:Connect(function()
 	if not isFarmingActive then return end
@@ -541,6 +541,27 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
+	-- If no valid target found because lastTargetPart blocked it, reset tracker so it can instantly target new spawns
+	if not closestPart and lastTargetPart then
+		lastTargetPart = nil
+		for _, part in ipairs(allDescendants) do
+			if not isCoinFading(part) then
+				local cf = getExactCoinCFrame(part)
+				if cf then
+					local heightOffset = tonumber(heightBox.Text) or settingsData.HeightOffset
+					local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
+					local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
+
+					if distanceToTarget < shortestDistance then
+						shortestDistance = distanceToTarget
+						closestPart = part
+						closestCF = cf
+					end
+				end
+			end
+		end
+	end
+
 	if closestPart and closestCF then
 		statusLabel.Text = "Status: Farming..."
 		
@@ -560,25 +581,25 @@ RunService.Heartbeat:Connect(function()
 		local distance = (targetPosition - currentPosition).Magnitude
 
 		if distance >= 500 then
-			-- Teleport when the coin is very far away
+			-- Instant Teleport when the first coin spawns or is very far away
 			rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
 			bv.Velocity = Vector3.zero
 		else
 			local direction = targetPosition - currentPosition
 
 			if distance > 0.15 then
-				-- Move directly toward the exact target while laying on back
+				-- Move smoothly toward the exact target while laying on back
 				bv.Velocity = direction.Unit * speed
 				rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
 			else
-				-- Correct remaining positional error, snap precisely, and immediately skip to the next coin
+				-- Instantly snap, mark as finished, and skip to the next coin without delay
 				bv.Velocity = Vector3.zero
 				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
 				lastTargetPart = closestPart
 			end
 		end
 	else
-		-- Reset last target tracker when waiting
+		-- Reset trackers when completely out of coins
 		lastTargetPart = nil
 		
 		if currentTargetAnchor then
@@ -587,6 +608,6 @@ RunService.Heartbeat:Connect(function()
 		end
 		
 		bv.Velocity = Vector3.zero
-		statusLabel.Text = "Status: Waiting (No coins)..."
+		statusLabel.Text = "Status: Waiting for coins..."
 	end
 end)
