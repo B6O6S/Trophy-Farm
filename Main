@@ -4,23 +4,27 @@ local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
 local StarterGui = game:GetService("StarterGui")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 if not player then return end
 
-local existingGui = CoreGui:FindFirstChild("AutoMapStatusGui") or player.PlayerGui:FindFirstChild("AutoMapStatusGui")
+-- Prevent duplicate execution
+local existingGui = CoreGui:FindFirstChild("AutoVoteUltimateGui") or player.PlayerGui:FindFirstChild("AutoVoteUltimateGui")
 if existingGui then
-	print("[AutoMap] The script is already running!")
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
-			Title = "AutoMap",
-			Text = "The script is already running!",
+			Title = "AutoVote",
+			Text = "Script is already active!",
 			Duration = 3
 		})
 	end)
 	return
 end
 
+--------------------------------------------------------
+-- OPTIMIZATION & LIGHTING SETTINGS
+--------------------------------------------------------
 pcall(function()
 	Lighting.GlobalShadows = false
 	Lighting.FogEnd = 9e9
@@ -73,6 +77,9 @@ RunService.Stepped:Connect(function()
 	end)
 end)
 
+--------------------------------------------------------
+-- VISUAL CLEANUP & HIDING ROUTINES
+--------------------------------------------------------
 local function HideObject(obj)
 	if not obj or not obj.Parent then return end
 
@@ -133,7 +140,6 @@ end)
 
 local function SetupCharacter(targetPlayer, character)
 	if not character then return end
-	
 	if targetPlayer ~= player then
 		for _, part in ipairs(character:GetDescendants()) do
 			if part:IsA("BasePart") or part:IsA("MeshPart") then
@@ -162,230 +168,284 @@ Players.PlayerAdded:Connect(function(p)
 	p.CharacterAdded:Connect(function(c) SetupCharacter(p, c) end)
 end)
 
-local CHECK_DELAY = 0.5
-local TELEPORT_DISTANCE = -2 
-local RESET_DELAY = 0.2 
-local RESPAWN_DELAY = 0
-local POST_MATCH_WAIT = 10
-local VOTE_DURATION = 10 
+--------------------------------------------------------
+-- HIGH-QUALITY MODERN GUI CREATION
+--------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoVoteUltimateGui"
+ScreenGui.ResetOnSpawn = false
+pcall(function() ScreenGui.Parent = CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent = player:WaitForChild("PlayerGui") end
 
-local priorityList = {
-	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
-	"Vampire's Castle", "Mansion 2", "WorkPlace", "Hotel 2", "Farm House", 
-	"Police Station", "Factory", "Bio Lab", "Research Facility", "Mil Base"
-}
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 280, 0, 110)
+MainFrame.Position = UDim2.new(0.5, -140, 0, 15)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
 
-local allKnownMaps = {
-	"Bank2", "BioLab", "Factory", "Hospital3", "Hotel2", "House2", 
-	"Mansion2", "MilBase", "Office3", "PoliceStation", "ResearchFacility", 
-	"Workplace", "BeachResort", "Yacht", "Pier", "Manor", "Farmhouse", 
-	"Mineshaft", "BarnInfection", "VampiresCastle", "Spaceship", "Workshop", 
-	"LogCabin", "TrainStation", "IceCastle", "SkiLodge", "ChristmasInItaly", "SkiVillage"
-}
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 12)
+UICorner.Parent = MainFrame
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AutoMapStatusGui"
-screenGui.ResetOnSpawn = false
-pcall(function() screenGui.Parent = CoreGui end)
-if not screenGui.Parent then screenGui.Parent = player:WaitForChild("PlayerGui") end
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 255, 170)
+UIStroke.Thickness = 1.5
+UIStroke.Transparency = 0.3
+UIStroke.Parent = MainFrame
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 160, 0, 26)
-frame.Position = UDim2.new(0.5, -80, 0, 8)
-frame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 32)
+Header.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
 
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 6)
-corner.Parent = frame
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 12)
+HeaderCorner.Parent = Header
 
-local stroke = Instance.new("UIStroke")
-stroke.Color = Color3.fromRGB(60, 60, 60)
-stroke.Thickness = 1
-stroke.Parent = frame
+local HeaderFix = Instance.new("Frame")
+HeaderFix.Size = UDim2.new(1, 0, 0, 10)
+HeaderFix.Position = UDim2.new(0, 0, 1, -10)
+HeaderFix.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+HeaderFix.BorderSizePixel = 0
+HeaderFix.Parent = Header
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -10, 1, 0)
-statusLabel.Position = UDim2.new(0, 5, 0, 0)
-statusLabel.BackgroundTransparency = 1
-statusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-statusLabel.TextSize = 11
-statusLabel.Font = Enum.Font.GothamMedium
-statusLabel.Text = "Initializing..."
-statusLabel.Parent = frame
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -20, 1, 0)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "⚡ AUTO VOTE PRO"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 13
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
 
-local function updateStatus(text)
-	statusLabel.Text = text
+local UIGradient = Instance.new("UIGradient")
+UIGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 255, 170)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 255))
+})
+UIGradient.Parent = Title
+
+local StatusBox = Instance.new("Frame")
+StatusBox.Size = UDim2.new(1, -20, 0, 30)
+StatusBox.Position = UDim2.new(0, 10, 0, 38)
+StatusBox.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+StatusBox.BorderSizePixel = 0
+StatusBox.Parent = MainFrame
+
+local StatusCorner = Instance.new("UICorner")
+StatusCorner.CornerRadius = UDim.new(0, 6)
+StatusCorner.Parent = StatusBox
+
+local MapLabel = Instance.new("TextLabel")
+MapLabel.Size = UDim2.new(1, -10, 1, 0)
+MapLabel.Position = UDim2.new(0, 5, 0, 0)
+MapLabel.BackgroundTransparency = 1
+MapLabel.Text = "Target: Scanning..."
+MapLabel.TextColor3 = Color3.fromRGB(200, 255, 220)
+MapLabel.TextSize = 11
+MapLabel.Font = Enum.Font.GothamMedium
+MapLabel.TextXAlignment = Enum.TextXAlignment.Left
+MapLabel.Parent = StatusBox
+
+local BadgesFrame = Instance.new("Frame")
+BadgesFrame.Size = UDim2.new(1, -20, 0, 28)
+BadgesFrame.Position = UDim2.new(0, 10, 0, 74)
+BadgesFrame.BackgroundTransparency = 1
+BadgesFrame.Parent = MainFrame
+
+local function CreateBadge(text, position, color)
+	local badge = Instance.new("Frame")
+	badge.Size = UDim2.new(0.48, 0, 1, 0)
+	badge.Position = position
+	badge.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+	badge.BorderSizePixel = 0
+	badge.Parent = BadgesFrame
+
+	local bCorner = Instance.new("UICorner")
+	bCorner.CornerRadius = UDim.new(0, 6)
+	bCorner.Parent = badge
+
+	local bStroke = Instance.new("UIStroke")
+	bStroke.Color = color
+	bStroke.Thickness = 1
+	bStroke.Transparency = 0.5
+	bStroke.Parent = badge
+
+	local bLabel = Instance.new("TextLabel")
+	bLabel.Size = UDim2.new(1, 0, 1, 0)
+	bLabel.BackgroundTransparency = 1
+	bLabel.Text = text
+	bLabel.TextColor3 = color
+	bLabel.TextSize = 10
+	bLabel.Font = Enum.Font.GothamBold
+	bLabel.Parent = badge
+
+	return badge
 end
 
-local function getCharacter()
-	local char = player.Character
-	if not char or not char:FindFirstChild("HumanoidRootPart") then
-		char = player.CharacterAdded:Wait()
-		char:WaitForChild("HumanoidRootPart", 5)
-		char:WaitForChild("Humanoid", 5)
-	end
-	return char
-end
+CreateBadge("MODE: SMALLEST", UDim2.new(0, 0, 0, 0), Color3.fromRGB(0, 255, 170))
+CreateBadge("AURA: ACTIVE", UDim2.new(0.52, 0, 0, 0), Color3.fromRGB(255, 215, 0))
 
-local function findDetectorPart(votePad)
-	for _, child in ipairs(votePad:GetDescendants()) do
-		if child:IsA("BasePart") and (child.Name:match("^Detector") or child.Name:match("Detector")) then
-			return child
+--------------------------------------------------------
+-- COIN AURA SYSTEM
+--------------------------------------------------------
+local radius = 8
+local firetouch = firetouchinterest
+
+local function touch(a, b)
+	pcall(function()
+		if firetouch then
+			firetouch(a, b, 0)
+			firetouch(a, b, 1)
 		end
-	end
-	if votePad:IsA("BasePart") then return votePad end
-	if votePad:IsA("Model") and votePad.PrimaryPart then return votePad.PrimaryPart end
-	return votePad:FindFirstChildWhichIsA("BasePart", true)
-end
-
-local function checkWorkspaceMap()
-	for _, mapName in ipairs(allKnownMaps) do
-		local formattedName = string.gsub(mapName, "%s+", "")
-		if Workspace:FindFirstChild(formattedName) then
-			return formattedName
-		end
-	end
-	return nil
-end
-
-local function isMatchingMap(uiText, targetMapName)
-	local cleanUI = string.lower(string.gsub(uiText, "%s+", ""))
-	local cleanTarget = string.lower(string.gsub(targetMapName, "%s+", ""))
-	
-	if cleanTarget == "house2" then
-		return cleanUI == "house2"
-	end
-	
-	return string.find(cleanUI, cleanTarget, 1, true) ~= nil
-end
-
-local function findSpecificMap(targetMapName)
-	local lobby = Workspace:FindFirstChild("Lobby")
-	if not lobby then return nil end
-	
-	local votePadsFolder = lobby:FindFirstChild("VotePads")
-	if not votePadsFolder then return nil end
-	
-	for i = 1, 3 do
-		local votePad = votePadsFolder:FindFirstChild("VotePad" .. i)
-		if votePad then
-			local voteInfoGui = votePad:FindFirstChild("VoteInfoGui")
-			local container = voteInfoGui and voteInfoGui:FindFirstChild("Container")
-			local mapNameObj = container and container:FindFirstChild("MapName")
-
-			if mapNameObj and (mapNameObj:IsA("TextLabel") or mapNameObj:IsA("TextButton") or mapNameObj:IsA("TextBox")) then
-				local text = tostring(mapNameObj.Text)
-				if text ~= "" then
-					if isMatchingMap(text, targetMapName) then
-						local detectorPart = findDetectorPart(votePad)
-						if detectorPart then
-							return { name = targetMapName, text = text, part = detectorPart }
-						end
-					end
-				end
-			end
-		end
-	end
-	return nil
-end
-
-local function findAnyPriorityMap()
-	for _, mapName in ipairs(priorityList) do
-		local result = findSpecificMap(mapName)
-		if result then return result end
-	end
-	return nil
-end
-
-local function teleportToMap(targetPart)
-	local success, err = pcall(function()
-		local character = getCharacter()
-		if not character then return false end
-		
-		local root = character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if not root or not humanoid or humanoid.Health <= 0 then return false end
-		if checkWorkspaceMap() then return false end
-
-		local targetPos = targetPart.Position + Vector3.new(0, TELEPORT_DISTANCE, 0)
-
-		root.CFrame = CFrame.new(targetPos)
-		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-		root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-
-		if RESET_DELAY > 0 then task.wait(RESET_DELAY) end
-		if checkWorkspaceMap() then return false end
-		if humanoid and humanoid.Health > 0 then humanoid.Health = 0 end
-		if RESPAWN_DELAY > 0 then task.wait(RESPAWN_DELAY) end
-		
-		local startTime = tick()
-		repeat
-			task.wait(0.1)
-			local newChar = player.Character
-			if newChar and newChar:FindFirstChild("HumanoidRootPart") and newChar:FindFirstChildOfClass("Humanoid") and newChar.Humanoid.Health > 0 then
-				break
-			end
-		until tick() - startTime > 5
-		
-		return true
 	end)
-	return success and err ~= false
 end
 
-updateStatus("Scanning...")
+local function getCoinContainers()
+	local containers = {}
+	for _, map in ipairs(Workspace:GetChildren()) do
+		local container = map:FindFirstChild("CoinContainer")
+		if container then
+			table.insert(containers, container)
+		end
+	end
+	return containers
+end
+
+local function getCoinParts(containers)
+	local parts = {}
+	for _, container in ipairs(containers) do
+		for _, descendant in ipairs(container:GetDescendants()) do
+			if descendant:IsA("BasePart") and descendant:FindFirstChild("TouchInterest") then
+				table.insert(parts, descendant)
+			end
+		end
+	end
+	return parts
+end
+
+RunService.Heartbeat:Connect(function()
+	local character = player.Character
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	
+	local rootPos = rootPart.Position
+	local containers = getCoinContainers()
+	local coinParts = getCoinParts(containers)
+	
+	for _, part in ipairs(coinParts) do
+		if (rootPos - part.Position).Magnitude <= radius then
+			touch(rootPart, part)
+		end
+	end
+end)
+
+--------------------------------------------------------
+-- AUTO VOTE SYSTEM (SMALLEST MAP & RESET)
+--------------------------------------------------------
+local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
+local OFFSET = Vector3.new(0, 1, 0)
+
+local ORDER = { 
+	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
+	"Vampire's Castle", "Mansion 2", "WorkPlace", "Hotel 2", 
+	"Farm House", "Police Station", "Factory", "Bio Lab", 
+	"Research Facility", "Mil Base"
+}
+
+local function normalize(s)
+	s = string.lower(s):gsub("-", " "):gsub("%s+", " ")
+	return s:match("^%s*(.-)%s*$")
+end
+
+local function stripParen(s)
+	local p = string.find(s, " (", 1, true)
+	return p and s:sub(1, p - 1) or s
+end
+
+local RANK_SMALL = {}
+for i, name in ipairs(ORDER) do
+	local full = normalize(name)
+	local base = stripParen(full)
+	RANK_SMALL[full] = i
+	if not RANK_SMALL[base] then 
+		RANK_SMALL[base] = i + 0.05 
+	end
+end
+
+local function getOpenPads()
+	local open = {}
+	local lobby = Workspace:FindFirstChild("Lobby")
+	local folder = lobby and lobby:FindFirstChild("VotePads")
+	if not folder then return open end
+	for _, name in ipairs(PAD_NAMES) do
+		local pad = folder:FindFirstChild(name)
+		local trigger = pad and pad:FindFirstChild("Pad")
+		local gui = pad and pad:FindFirstChild("VoteInfoGui")
+		local container = gui and gui:FindFirstChild("Container")
+		local label = container and container:FindFirstChild("MapName")
+		if trigger and label and gui.Enabled then
+			table.insert(open, { trigger = trigger, gui = gui, map = label.Text })
+		end
+	end
+	return open
+end
+
+local function pickSmallest(open)
+	local best, bestScore = nil, math.huge
+	for _, p in ipairs(open) do
+		local low = normalize(p.map)
+		local clean = stripParen(low)
+		local score = RANK_SMALL[low] or RANK_SMALL[clean] or 999
+		if score < bestScore then
+			best, bestScore = p, score
+		end
+	end
+	return best
+end
+
+local votedChar = nil
 
 task.spawn(function()
 	while true do
+		task.wait(0.1)
 		pcall(function()
-			local activeMap = checkWorkspaceMap()
-			if activeMap then
-				updateStatus(activeMap)
-				repeat task.wait(1) until not checkWorkspaceMap()
+			local open = getOpenPads()
+			if #open == 0 then
+				MapLabel.Text = "Target: Waiting for pads..."
+				votedChar = nil
 			else
-				for i = POST_MATCH_WAIT, 1, -1 do
-					updateStatus("Waiting (" .. i .. "s)")
-					task.wait(1)
-				end
-
-				local initialResult = nil
-				while not initialResult and not checkWorkspaceMap() do
-					initialResult = findAnyPriorityMap()
-					if not initialResult then
-						updateStatus("Scanning...")
-						task.wait(CHECK_DELAY)
-					end
-				end
-
-				if not checkWorkspaceMap() and initialResult then
-					local lockedMapName = initialResult.name
-					updateStatus("Locked: " .. lockedMapName)
+				local target = pickSmallest(open)
+				if target then
+					MapLabel.Text = "Target: " .. target.map
 					
-					local voteStartTime = tick()
-					while (tick() - voteStartTime < VOTE_DURATION) and not checkWorkspaceMap() do
-						local timeLeft = math.ceil(VOTE_DURATION - (tick() - voteStartTime))
-						local currentResult = findSpecificMap(lockedMapName)
-						if currentResult then
-							updateStatus(currentResult.name .. " (" .. timeLeft .. "s)")
-							local tpSuccess = teleportToMap(currentResult.part)
-							if not tpSuccess or checkWorkspaceMap() then break end
-						else
-							updateStatus("Finding (" .. timeLeft .. "s)")
-						end
-						task.wait(CHECK_DELAY)
-					end
-
-					if not checkWorkspaceMap() then
-						updateStatus("Selected!")
-						while not checkWorkspaceMap() do
-							updateStatus("Spawning...")
-							task.wait(1)
+					local char = player.Character
+					local hum = char and char:FindFirstChildOfClass("Humanoid")
+					local hrp = hum and hum.RootPart
+					
+					if hrp and hum.Health > 0 and char ~= votedChar then
+						hrp.CFrame = CFrame.new(target.trigger.Position + OFFSET) * hrp.CFrame.Rotation
+						touch(hrp, target.trigger)
+						
+						task.wait(0.12)
+						
+						if hum and hum.Health > 0 then
+							votedChar = char
+							hum:ChangeState(Enum.HumanoidStateType.Dead)
+							hum.Health = 0
 						end
 					end
 				end
 			end
 		end)
-		task.wait(0.1)
 	end
 end)
