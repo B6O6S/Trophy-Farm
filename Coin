@@ -56,6 +56,7 @@ local isAutoKillAllActive = settingsData.AutoKillAll
 local isFpsBoosterActive = settingsData.FpsBooster
 
 local isBagFull = false
+local hasTeleportedToSafeZone = false
 local timerPlayedThisLife = false
 local weaponWaitTimer = 0
 local hadCoinsBefore = false
@@ -67,6 +68,7 @@ local votedChar = nil
 -- Reset State On Respawn
 local function onCharacterAdded(char)
 	isBagFull = false
+	hasTeleportedToSafeZone = false
 	timerPlayedThisLife = false
 	weaponWaitTimer = 0
 	hadCoinsBefore = false
@@ -515,6 +517,7 @@ task.spawn(function()
 			timerLabel.Text = "00.0s (Inactive)"
 			visitedCoins = {}
 			isBagFull = false
+			hasTeleportedToSafeZone = false
 			weaponWaitTimer = 0
 			hadCoinsBefore = false
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
@@ -889,12 +892,36 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- ============ BAG FULL ACTIONS (NO PLATFORM TP) ============
+	-- ============ BAG FULL ACTIONS: UNRAGDOLL, UNFREEZE & TP ============
 	if isBagFull then
-		if statusLabel then statusLabel.Text = "Status: Bag Full!" end
+		if statusLabel then statusLabel.Text = "Status: Bag Full! Unfreezing & Teleporting..." end
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
-		bv.Velocity = Vector3.zero
+		
+		-- Remove velocity / unfreeze movement
+		if rootPart:FindFirstChild("SmoothFarmVelocity") then
+			rootPart.SmoothFarmVelocity:Destroy()
+		end
+
+		-- Unragdoll / restore character states and collisions
+		if humanoid then
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+		
+		if character then
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = true
+				end
+			end
+		end
+
+		-- Teleport to requested exact coordinates once
+		if not hasTeleportedToSafeZone then
+			rootPart.CFrame = CFrame.new(560, 461, 38)
+			hasTeleportedToSafeZone = true
+		end
 
 		-- Trigger Combat Actions locally
 		if hasKnife() and isAutoKillAllActive then
@@ -913,6 +940,8 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 
 		return
+	else
+		hasTeleportedToSafeZone = false
 	end
 
 	-- ============ ACTIVE COIN FARMING MOVEMENT ============
