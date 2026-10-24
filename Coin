@@ -8,7 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
-local Camera = workspace.CurrentCamera
+local Camera = Workspace.CurrentCamera
 local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
@@ -25,7 +25,8 @@ local settingsData = {
 	AutoVote = false,
 	ShootMurderer = false,
 	AutoKillAll = false,
-	FpsBooster = false
+	FpsBooster = false,
+	AutoRejoin = true
 }
 
 -- Load Saved Settings
@@ -54,6 +55,7 @@ local isAutoVoteActive = settingsData.AutoVote
 local isShootMurdererActive = settingsData.ShootMurderer
 local isAutoKillAllActive = settingsData.AutoKillAll
 local isFpsBoosterActive = settingsData.FpsBooster
+local isAutoRejoinActive = settingsData.AutoRejoin
 
 local isBagFull = false
 local hasTeleportedToSafeZone = false
@@ -61,9 +63,19 @@ local timerPlayedThisLife = false
 local weaponWaitTimer = 0
 local hadCoinsBefore = false
 
+-- Coins Per Hour Tracker Variables
+local farmStartTime = tick()
+local coinsCollectedSession = 0
+local initialCoins = 0
+
 local currentTargetAnchor = nil
 local visitedCoins = {}
 local votedChar = nil
+
+-- Auto Fire Config
+local delayBetweenClicks = 0.05
+local lastActionTime = 0
+local clickState = false
 
 -- Reset State On Respawn
 local function onCharacterAdded(char)
@@ -77,19 +89,41 @@ end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
+-- Track Leaderstats Coins
+task.spawn(function()
+	local leaderstats = LocalPlayer:WaitForChild("leaderstats", 10)
+	if leaderstats then
+		local coinsStat = leaderstats:FindFirstChild("Coins") or leaderstats:FindFirstChild("Coin")
+		if coinsStat then
+			initialCoins = coinsStat.Value
+			coinsStat.Changed:Connect(function(newVal)
+				if newVal > initialCoins then
+					coinsCollectedSession = coinsCollectedSession + (newVal - initialCoins)
+				end
+				initialCoins = newVal
+			end)
+		end
+	end
+end)
+
 -- Instant Auto-Rejoin On Kick
+local function attemptRejoin()
+	if not isAutoRejoinActive then return end
+	task.spawn(function()
+		while isAutoRejoinActive do
+			pcall(function()
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+			end)
+			task.wait(1)
+		end
+	end)
+end
+
 local function setupAutoRejoin()
 	GuiService.ErrorMessageChanged:Connect(function()
 		local errorMessage = GuiService:GetErrorMessage()
 		if errorMessage and errorMessage ~= "" then
-			task.spawn(function()
-				while true do
-					pcall(function()
-						TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-					end)
-					task.wait(1)
-				end
-			end)
+			attemptRejoin()
 		end
 	end)
 
@@ -97,14 +131,7 @@ local function setupAutoRejoin()
 		local coreGui = game:GetService("CoreGui")
 		coreGui.ChildAdded:Connect(function(child)
 			if child.Name == "RobloxPromptDialog" then
-				task.spawn(function()
-					while true do
-						pcall(function()
-							TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-						end)
-						task.wait(1)
-					end
-				end)
+				attemptRejoin()
 			end
 		end)
 	end)
@@ -112,10 +139,11 @@ end
 
 setupAutoRejoin()
 
--- ==================== BUILT-IN FPS BOOSTER ENGINE ====================
+-- ==================== FPS BOOSTER ENGINE (MATERIALS PRESERVED) ====================
 local function applyFpsBoost(enable)
 	pcall(function()
 		if enable then
+			-- Disable Lighting Effects & Shadows while keeping original materials
 			Lighting.GlobalShadows = false
 			Lighting.FogEnd = 9e9
 			Lighting.Technology = Enum.Technology.Compatibility
@@ -126,17 +154,27 @@ local function applyFpsBoost(enable)
 				end
 			end
 
+			-- Destroy Light Sources & Heavy Particle Emitters
 			for _, v in ipairs(Workspace:GetDescendants()) do
-				if v:IsA("BasePart") and not v:IsA("MeshPart") then
-					v.Material = Enum.Material.SmoothPlastic
-					v.Reflectance = 0
-				elseif v:IsA("Decal") or v:IsA("Texture") then
-					v.Transparency = 1
-				elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") then
-					v.Enabled = false
+				if v:IsA("PointLight") or v:IsA("SpotLight") or v:IsA("SurfaceLight") then
+					v:Destroy()
+				elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") or v:IsA("Sparkles") then
+					v:Destroy()
 				end
 			end
 
+			-- Strip Accessories/Hats from all Players
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p.Character then
+					for _, acc in ipairs(p.Character:GetChildren()) do
+						if acc:IsA("Accessory") or acc:IsA("Hat") then
+							acc:Destroy()
+						end
+					end
+				end
+			end
+
+			-- Lower Water Surface Reflections
 			local terrain = Workspace:FindFirstChildOfClass("Terrain")
 			if terrain then
 				terrain.WaterWaveSize = 0
@@ -148,7 +186,23 @@ local function applyFpsBoost(enable)
 	end)
 end
 
--- ==================== EXACT COIN AURA METHODS ====================
+-- Strip accessories when characters spawn under FPS Booster
+Players.PlayerAdded:Connect(function(plr)
+	plr.CharacterAdded:Connect(function(char)
+		if isFpsBoosterActive then
+			task.wait(1)
+			pcall(function()
+				for _, acc in ipairs(char:GetChildren()) do
+					if acc:IsA("Accessory") or acc:IsA("Hat") then
+						acc:Destroy()
+					end
+				end
+			end)
+		end
+	end)
+end)
+
+-- ==================== COIN AURA METHODS ====================
 local function touch(a, b)
 	pcall(function()
 		firetouchinterest(a, b, 0)
@@ -177,40 +231,6 @@ local function getCoinParts(containers)
 		end
 	end
 	return parts
-end
-
-local function addHighlight(target)
-	if target and (target:IsA("BasePart") or target:IsA("Model")) then
-		if not target:FindFirstChild("CoinHighlight") then
-			local highlight = Instance.new("Highlight")
-			highlight.Name = "CoinHighlight"
-			highlight.OutlineTransparency = 1
-			highlight.FillTransparency = 0.35
-			
-			local function updateColor()
-				if target:IsA("BasePart") then
-					highlight.FillColor = target.Color
-				elseif target:IsA("Model") then
-					local primary = target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")
-					if primary then
-						highlight.FillColor = primary.Color
-					else
-						highlight.FillColor = Color3.fromRGB(255, 215, 0)
-					end
-				end
-			end
-			
-			updateColor()
-			
-			if target:IsA("BasePart") then
-				target:GetPropertyChangedSignal("Color"):Connect(function()
-					highlight.FillColor = target.Color
-				end)
-			end
-			
-			highlight.Parent = target
-		end
-	end
 end
 
 local function isTargetCoin(desc)
@@ -264,32 +284,11 @@ local function hasWeapon()
 	return hasKnife() or hasGun()
 end
 
-local function highlightCoins()
-	for _, map in ipairs(Workspace:GetChildren()) do
-		local container = map:FindFirstChild("CoinContainer")
-		if container then
-			for _, desc in ipairs(container:GetDescendants()) do
-				if isTargetCoin(desc) then
-					addHighlight(desc)
-				end
-			end
-		end
-	end
-end
-
-highlightCoins()
-
-Workspace.DescendantAdded:Connect(function(descendant)
-	if isTargetCoin(descendant) then
-		task.wait(0.1)
-		addHighlight(descendant)
-	end
-end)
-
 --------------------------------------------------------
--- GUI CREATION WITH SAVED STATES & LIVE TIMER
+-- COMPACT GUI CREATION (ZANWAH HUB)
 --------------------------------------------------------
-local speedInput, heightInput, radiusInput, statusLabel, timerLabel
+local speedInput, heightInput, radiusInput, statusLabel, timerLabel, cphLabel
+local isMinimized = false
 
 task.spawn(function()
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui", 30)
@@ -307,69 +306,100 @@ task.spawn(function()
 	screenGui.Parent = playerGui
 
 	local mainFrame = Instance.new("Frame")
-	mainFrame.Size = UDim2.new(0, 260, 0, 520)
+	mainFrame.Size = UDim2.new(0, 220, 0, 360)
 	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
-	mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 	mainFrame.BorderSizePixel = 0
 	mainFrame.Active = true
 	mainFrame.Draggable = true
+	mainFrame.ClipsDescendants = true
 	mainFrame.Parent = screenGui
 
-	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
+	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
 	local mainStroke = Instance.new("UIStroke")
-	mainStroke.Color = Color3.fromRGB(70, 70, 110)
-	mainStroke.Thickness = 1.5
+	mainStroke.Color = Color3.fromRGB(60, 60, 90)
+	mainStroke.Thickness = 1.2
 	mainStroke.Parent = mainFrame
 
 	local headerFrame = Instance.new("Frame")
-	headerFrame.Size = UDim2.new(1, 0, 0, 45)
-	headerFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+	headerFrame.Size = UDim2.new(1, 0, 0, 32)
+	headerFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
 	headerFrame.BorderSizePixel = 0
 	headerFrame.Parent = mainFrame
 
-	Instance.new("UICorner", headerFrame).CornerRadius = UDim.new(0, 10)
+	Instance.new("UICorner", headerFrame).CornerRadius = UDim.new(0, 8)
 
 	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.new(1, 0, 1, 0)
+	titleLabel.Size = UDim2.new(1, -35, 1, 0)
+	titleLabel.Position = UDim2.new(0, 8, 0, 0)
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "⚡ ELITE AUTOMATION HUB"
+	titleLabel.Text = "⚡ ZANWAH HUB"
 	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	titleLabel.TextSize = 14
+	titleLabel.TextSize = 11
 	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Parent = headerFrame
 
+	-- Minimize Button
+	local minimizeBtn = Instance.new("TextButton")
+	minimizeBtn.Size = UDim2.new(0, 22, 0, 20)
+	minimizeBtn.Position = UDim2.new(1, -26, 0, 6)
+	minimizeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+	minimizeBtn.Text = "–"
+	minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	minimizeBtn.TextSize = 13
+	minimizeBtn.Font = Enum.Font.GothamBold
+	minimizeBtn.Parent = headerFrame
+	Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 4)
+
 	local contentContainer = Instance.new("ScrollingFrame")
-	contentContainer.Size = UDim2.new(1, -16, 1, -55)
-	contentContainer.Position = UDim2.new(0, 8, 0, 50)
+	contentContainer.Size = UDim2.new(1, -10, 1, -36)
+	contentContainer.Position = UDim2.new(0, 5, 0, 34)
 	contentContainer.BackgroundTransparency = 1
 	contentContainer.BorderSizePixel = 0
-	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 520)
-	contentContainer.ScrollBarThickness = 3
+	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 420)
+	contentContainer.ScrollBarThickness = 2
 	contentContainer.Parent = mainFrame
 
+	minimizeBtn.MouseButton1Click:Connect(function()
+		isMinimized = not isMinimized
+		if isMinimized then
+			contentContainer.Visible = false
+			mainFrame:TweenSize(UDim2.new(0, 220, 0, 32), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
+			minimizeBtn.Text = "+"
+		else
+			mainFrame:TweenSize(UDim2.new(0, 220, 0, 360), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
+				contentContainer.Visible = true
+			end)
+			minimizeBtn.Text = "–"
+		end
+	end)
+
 	local function updateToggleVisual(btn, state, text)
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		if state then
-			btn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+			btn.BackgroundColor3 = Color3.fromRGB(35, 140, 80)
 			btn.Text = text .. ": ON"
 		else
-			btn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+			btn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
 			btn.Text = text .. ": OFF"
 		end
 	end
 
 	local function createButton(text, posY, initialState)
 		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1, 0, 0, 34)
+		btn.Size = UDim2.new(1, 0, 0, 25)
 		btn.Position = UDim2.new(0, 0, 0, posY)
-		btn.TextSize = 13
+		btn.TextSize = 10
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		btn.Font = Enum.Font.GothamSemibold
 		btn.Parent = contentContainer
 		
-		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 		
 		local stroke = Instance.new("UIStroke")
-		stroke.Color = Color3.fromRGB(70, 70, 95)
+		stroke.Color = Color3.fromRGB(60, 60, 85)
 		stroke.Thickness = 1
 		stroke.Parent = btn
 
@@ -377,38 +407,39 @@ task.spawn(function()
 		return btn
 	end
 
-	local farmerBtn = createButton("Auto Farm", 5, isFarmingActive)
-	local voteBtn = createButton("Auto Vote", 45, isAutoVoteActive)
-	local shootBtn = createButton("Shoot Murderer", 85, isShootMurdererActive)
-	local killBtn = createButton("Auto Kill All", 125, isAutoKillAllActive)
-	local fpsBtn = createButton("FPS Booster", 165, isFpsBoosterActive)
+	local farmerBtn = createButton("Auto Farm", 0, isFarmingActive)
+	local voteBtn = createButton("Auto Vote", 28, isAutoVoteActive)
+	local shootBtn = createButton("Shoot Murderer", 56, isShootMurdererActive)
+	local killBtn = createButton("Auto Kill All", 84, isAutoKillAllActive)
+	local fpsBtn = createButton("FPS Booster", 112, isFpsBoosterActive)
+	local rejoinBtn = createButton("Auto Rejoin", 140, isAutoRejoinActive)
 
 	local function createInput(labelText, defaultVal, posY, settingKey)
 		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(0, 120, 0, 30)
+		label.Size = UDim2.new(0, 95, 0, 24)
 		label.Position = UDim2.new(0, 0, 0, posY)
 		label.BackgroundTransparency = 1
 		label.Text = labelText
-		label.TextColor3 = Color3.fromRGB(180, 180, 200)
-		label.TextSize = 13
+		label.TextColor3 = Color3.fromRGB(170, 170, 190)
+		label.TextSize = 10
 		label.Font = Enum.Font.GothamMedium
 		label.TextXAlignment = Enum.TextXAlignment.Left
 		label.Parent = contentContainer
 
 		local box = Instance.new("TextBox")
-		box.Size = UDim2.new(0, 110, 0, 30)
-		box.Position = UDim2.new(1, -110, 0, posY)
-		box.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+		box.Size = UDim2.new(0, 85, 0, 24)
+		box.Position = UDim2.new(1, -85, 0, posY)
+		box.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
 		box.TextColor3 = Color3.fromRGB(255, 255, 255)
 		box.Text = tostring(defaultVal)
-		box.TextSize = 13
+		box.TextSize = 10
 		box.Font = Enum.Font.Gotham
 		box.Parent = contentContainer
 		
-		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
 		
 		local stroke = Instance.new("UIStroke")
-		stroke.Color = Color3.fromRGB(60, 60, 85)
+		stroke.Color = Color3.fromRGB(55, 55, 80)
 		stroke.Thickness = 1
 		stroke.Parent = box
 		
@@ -430,73 +461,72 @@ task.spawn(function()
 		return box
 	end
 
-	speedInput = createInput("Speed", settingsData.Speed, 215, "Speed")
-	heightInput = createInput("Height Offset", settingsData.HeightOffset, 255, "HeightOffset")
-	radiusInput = createInput("Aura Radius", settingsData.AuraRadius, 295, "AuraRadius")
+	speedInput = createInput("Speed", settingsData.Speed, 170, "Speed")
+	heightInput = createInput("Height Offset", settingsData.HeightOffset, 198, "HeightOffset")
+	radiusInput = createInput("Aura Radius", settingsData.AuraRadius, 226, "AuraRadius")
 
 	-- Status Box
 	local statusBox = Instance.new("Frame")
-	statusBox.Size = UDim2.new(1, 0, 0, 45)
-	statusBox.Position = UDim2.new(0, 0, 0, 340)
-	statusBox.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
+	statusBox.Size = UDim2.new(1, 0, 0, 28)
+	statusBox.Position = UDim2.new(0, 0, 0, 256)
+	statusBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
 	statusBox.BorderSizePixel = 0
 	statusBox.Parent = contentContainer
 
-	Instance.new("UICorner", statusBox).CornerRadius = UDim.new(0, 6)
-
-	local statusTitle = Instance.new("TextLabel")
-	statusTitle.Size = UDim2.new(1, -10, 0, 16)
-	statusTitle.Position = UDim2.new(0, 5, 0, 3)
-	statusTitle.BackgroundTransparency = 1
-	statusTitle.Text = "SYSTEM STATUS"
-	statusTitle.TextColor3 = Color3.fromRGB(140, 140, 170)
-	statusTitle.TextSize = 10
-	statusTitle.Font = Enum.Font.GothamBold
-	statusTitle.TextXAlignment = Enum.TextXAlignment.Left
-	statusTitle.Parent = statusBox
+	Instance.new("UICorner", statusBox).CornerRadius = UDim.new(0, 4)
 
 	statusLabel = Instance.new("TextLabel")
-	statusLabel.Size = UDim2.new(1, -10, 0, 20)
-	statusLabel.Position = UDim2.new(0, 5, 0, 20)
+	statusLabel.Size = UDim2.new(1, -8, 1, 0)
+	statusLabel.Position = UDim2.new(0, 4, 0, 0)
 	statusLabel.BackgroundTransparency = 1
-	statusLabel.Text = "Idle / Ready"
+	statusLabel.Text = "Status: Idle / Ready"
 	statusLabel.TextColor3 = Color3.fromRGB(0, 255, 170)
-	statusLabel.TextSize = 12
+	statusLabel.TextSize = 9
 	statusLabel.Font = Enum.Font.GothamMedium
 	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 	statusLabel.Parent = statusBox
 
 	-- Live Timer Box
 	local timerBox = Instance.new("Frame")
-	timerBox.Size = UDim2.new(1, 0, 0, 45)
-	timerBox.Position = UDim2.new(0, 0, 0, 392)
-	timerBox.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
+	timerBox.Size = UDim2.new(1, 0, 0, 28)
+	timerBox.Position = UDim2.new(0, 0, 0, 288)
+	timerBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
 	timerBox.BorderSizePixel = 0
 	timerBox.Parent = contentContainer
 
-	Instance.new("UICorner", timerBox).CornerRadius = UDim.new(0, 6)
-
-	local timerTitle = Instance.new("TextLabel")
-	timerTitle.Size = UDim2.new(1, -10, 0, 16)
-	timerTitle.Position = UDim2.new(0, 5, 0, 3)
-	timerTitle.BackgroundTransparency = 1
-	timerTitle.Text = "ACTIVE TIMER / STATUS"
-	timerTitle.TextColor3 = Color3.fromRGB(140, 140, 170)
-	timerTitle.TextSize = 10
-	timerTitle.Font = Enum.Font.GothamBold
-	timerTitle.TextXAlignment = Enum.TextXAlignment.Left
-	timerTitle.Parent = timerBox
+	Instance.new("UICorner", timerBox).CornerRadius = UDim.new(0, 4)
 
 	timerLabel = Instance.new("TextLabel")
-	timerLabel.Size = UDim2.new(1, -10, 0, 20)
-	timerLabel.Position = UDim2.new(0, 5, 0, 20)
+	timerLabel.Size = UDim2.new(1, -8, 1, 0)
+	timerLabel.Position = UDim2.new(0, 4, 0, 0)
 	timerLabel.BackgroundTransparency = 1
-	timerLabel.Text = "00.0s (Inactive)"
+	timerLabel.Text = "Timer: 00.0s (Inactive)"
 	timerLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-	timerLabel.TextSize = 12
+	timerLabel.TextSize = 9
 	timerLabel.Font = Enum.Font.GothamBold
 	timerLabel.TextXAlignment = Enum.TextXAlignment.Left
 	timerLabel.Parent = timerBox
+
+	-- Coins Per Hour Box
+	local cphBox = Instance.new("Frame")
+	cphBox.Size = UDim2.new(1, 0, 0, 28)
+	cphBox.Position = UDim2.new(0, 0, 0, 320)
+	cphBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+	cphBox.BorderSizePixel = 0
+	cphBox.Parent = contentContainer
+
+	Instance.new("UICorner", cphBox).CornerRadius = UDim.new(0, 4)
+
+	cphLabel = Instance.new("TextLabel")
+	cphLabel.Size = UDim2.new(1, -8, 1, 0)
+	cphLabel.Position = UDim2.new(0, 4, 0, 0)
+	cphLabel.BackgroundTransparency = 1
+	cphLabel.Text = "Coins/Hr: 0"
+	cphLabel.TextColor3 = Color3.fromRGB(80, 200, 255)
+	cphLabel.TextSize = 9
+	cphLabel.Font = Enum.Font.GothamBold
+	cphLabel.TextXAlignment = Enum.TextXAlignment.Left
+	cphLabel.Parent = cphBox
 
 	if isFpsBoosterActive then
 		applyFpsBoost(true)
@@ -511,10 +541,12 @@ task.spawn(function()
 		local character, rootPart, humanoid = LocalPlayer.Character, LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"), LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
 
 		if isFarmingActive then
+			farmStartTime = tick()
+			coinsCollectedSession = 0
 			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
 		else
-			statusLabel.Text = "Idle / Ready"
-			timerLabel.Text = "00.0s (Inactive)"
+			statusLabel.Text = "Status: Idle / Ready"
+			timerLabel.Text = "Timer: 00.0s (Inactive)"
 			visitedCoins = {}
 			isBagFull = false
 			hasTeleportedToSafeZone = false
@@ -562,10 +594,17 @@ task.spawn(function()
 		updateToggleVisual(fpsBtn, isFpsBoosterActive, "FPS Booster")
 		applyFpsBoost(isFpsBoosterActive)
 	end)
+
+	rejoinBtn.MouseButton1Click:Connect(function()
+		isAutoRejoinActive = not isAutoRejoinActive
+		settingsData.AutoRejoin = isAutoRejoinActive
+		saveSettings()
+		updateToggleVisual(rejoinBtn, isAutoRejoinActive, "Auto Rejoin")
+	end)
 end)
 
 --------------------------------------------------------
--- REQUESTED AUTO FIRE FUNCTION
+-- REQUESTED AUTO FIRE ENGINE & RENDERSTEPPED LOOP
 --------------------------------------------------------
 local function performAutoFire(mousePos)
 	pcall(function()
@@ -581,6 +620,29 @@ local function performAutoFire(mousePos)
 		end
 	end
 end
+
+RunService.RenderStepped:Connect(function()
+	if not isShootMurdererActive then return end
+	
+	local character = LocalPlayer.Character
+	local tool = character and character:FindFirstChildOfClass("Tool")
+	
+	if tool then
+		local screenPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+		local currentTime = tick()
+		
+		if clickState then
+			performAutoFire(screenPos)
+			clickState = false
+			lastActionTime = currentTime
+		else
+			if currentTime - lastActionTime >= delayBetweenClicks then
+				clickState = true
+				lastActionTime = currentTime
+			end
+		end
+	end
+end)
 
 --------------------------------------------------------
 -- HELPER COMBAT METHODS
@@ -643,16 +705,6 @@ local function equipGun()
 	return false
 end
 
-local function unequipGun()
-	local char = LocalPlayer.Character
-	if not char then return end
-	local gun = getGun()
-	if gun and gun.Parent == char then
-		local backpack = LocalPlayer:FindFirstChild("Backpack")
-		if backpack then gun.Parent = backpack end
-	end
-end
-
 local function getMurd()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
@@ -668,23 +720,13 @@ end
 
 local function shootMurd()
 	if not equipGun() then return end
-	task.wait(0.2)
-	
+	task.wait(0.1)
 	local murd = getMurd()
-	local screenPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-	
 	if murd and murd.Character and murd.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
 		local hrp = LocalPlayer.Character.HumanoidRootPart
 		local mHrp = murd.Character.HumanoidRootPart
 		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, hrp.Position.Y, mHrp.Position.Z))
-		
-		local viewportPoint, onScreen = Camera:WorldToViewportPoint(mHrp.Position)
-		if onScreen then
-			screenPos = Vector2.new(viewportPoint.X, viewportPoint.Y)
-		end
 	end
-	
-	performAutoFire(screenPos)
 end
 
 local function killAll()
@@ -803,7 +845,16 @@ end)
 RunService.Heartbeat:Connect(function(dt)
 	local character, rootPart, humanoid = getCharacterParts()
 	
-	-- 1. COIN AURA IMPLEMENTATION
+	-- Calculate Coins Per Hour
+	if cphLabel then
+		local elapsed = tick() - farmStartTime
+		if elapsed > 2 then
+			local coinsPerHour = math.floor((coinsCollectedSession / elapsed) * 3600)
+			cphLabel.Text = string.format("Coins/Hr: %d", coinsPerHour)
+		end
+	end
+
+	-- Coin Aura
 	if character and rootPart then
 		local radius = (radiusInput and tonumber(radiusInput.Text)) or settingsData.AuraRadius
 		local rootPos = rootPart.Position
@@ -858,15 +909,15 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- ============ COIN DETECTION & "GONE TO FULL" LOGIC ============
+	-- Coin Detection & Gone-To-Full Logic
 	if activeCoinsExist then
 		hadCoinsBefore = true
 		weaponWaitTimer = 0
-		if timerLabel then timerLabel.Text = "Farming Coins..." end
+		if timerLabel then timerLabel.Text = "Timer: Farming Coins..." end
 	else
 		if hadCoinsBefore then
 			isBagFull = true
-			if timerLabel then timerLabel.Text = "Coins Gone (Bag Full)" end
+			if timerLabel then timerLabel.Text = "Timer: Coins Gone (Bag Full)" end
 		else
 			if hasWeapon() and not isBagFull then
 				if not timerPlayedThisLife then
@@ -874,36 +925,34 @@ RunService.Heartbeat:Connect(function(dt)
 					local remainingSeconds = math.max(0, 18 - weaponWaitTimer)
 					
 					if statusLabel then statusLabel.Text = "Status: Checking Inventory..." end
-					if timerLabel then timerLabel.Text = string.format("%.1fs remaining", remainingSeconds) end
+					if timerLabel then timerLabel.Text = string.format("Timer: %.1fs remaining", remainingSeconds) end
 
 					if weaponWaitTimer >= 18 then
 						isBagFull = true
 						timerPlayedThisLife = true
-						if timerLabel then timerLabel.Text = "18.0s Complete (Bag Full)" end
+						if timerLabel then timerLabel.Text = "Timer: Complete (Bag Full)" end
 					end
 				else
 					isBagFull = true
-					if timerLabel then timerLabel.Text = "Bag Full (Completed)" end
+					if timerLabel then timerLabel.Text = "Timer: Bag Full" end
 				end
 			elseif not hasWeapon() and not activeCoinsExist then
 				if statusLabel then statusLabel.Text = "Status: Waiting for Coins..." end
-				if timerLabel then timerLabel.Text = "00.0s (No Weapon)" end
+				if timerLabel then timerLabel.Text = "Timer: 00.0s (No Weapon)" end
 			end
 		end
 	end
 
-	-- ============ BAG FULL ACTIONS: UNRAGDOLL, UNFREEZE & TP ============
+	-- Bag Full Actions: Unragdoll, Unfreeze & Teleport to X:610, Y:562, Z:60
 	if isBagFull then
-		if statusLabel then statusLabel.Text = "Status: Bag Full! Unfreezing & Teleporting..." end
+		if statusLabel then statusLabel.Text = "Status: Full! Teleporting & Firing..." end
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
-		-- Remove velocity / unfreeze movement
 		if rootPart:FindFirstChild("SmoothFarmVelocity") then
 			rootPart.SmoothFarmVelocity:Destroy()
 		end
 
-		-- Unragdoll / restore character states and collisions
 		if humanoid then
 			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
 			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
@@ -917,13 +966,11 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 		end
 
-		-- Teleport to requested exact coordinates once
 		if not hasTeleportedToSafeZone then
-			rootPart.CFrame = CFrame.new(560, 461, 38)
+			rootPart.CFrame = CFrame.new(610, 562, 60)
 			hasTeleportedToSafeZone = true
 		end
 
-		-- Trigger Combat Actions locally
 		if hasKnife() and isAutoKillAllActive then
 			pcall(killAll)
 		elseif hasGun() and isShootMurdererActive then
@@ -932,8 +979,6 @@ RunService.Heartbeat:Connect(function(dt)
 				if murd and murd.Character and murd.Character:FindFirstChildOfClass("Humanoid") then
 					if murd.Character.Humanoid.Health > 0 then
 						shootMurd()
-						task.wait(0.5)
-						unequipGun()
 					end
 				end
 			end)
@@ -944,7 +989,7 @@ RunService.Heartbeat:Connect(function(dt)
 		hasTeleportedToSafeZone = false
 	end
 
-	-- ============ ACTIVE COIN FARMING MOVEMENT ============
+	-- Active Coin Farming Movement
 	local closestPart, closestCF = nil, nil
 	local shortestDistance = math.huge
 	local rootPos = rootPart.Position
@@ -967,7 +1012,7 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if closestPart and closestCF then
-		if statusLabel then statusLabel.Text = "Status: Fluid Farming Coins..." end
+		if statusLabel then statusLabel.Text = "Status: Farming Coins..." end
 		local exactCoinPos = updateTargetAnchor(closestCF)
 		local speed = (speedInput and tonumber(speedInput.Text)) or settingsData.Speed
 		local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
