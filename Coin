@@ -471,6 +471,7 @@ task.spawn(function()
 						local hrp = hum and hum.RootPart
 						
 						if hrp and hum.Health > 0 and char ~= votedChar then
+							wasOnPlatform = false -- Temporarily leave platform to vote
 							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
 							hrp.CFrame = CFrame.new(safePos)
 							
@@ -570,7 +571,7 @@ RunService.Heartbeat:Connect(function()
 
 	if closestPart and closestCF then
 		statusLabel.Text = "Status: Farming..."
-		wasOnPlatform = false
+		wasOnPlatform = false -- Reset so it knows we are actively farming
 		
 		-- Create / position anchor part at exact target coin CFrame
 		local exactCoinPos = updateTargetAnchor(closestCF)
@@ -619,7 +620,8 @@ RunService.Heartbeat:Connect(function()
 		-- Check if player has a tool in inventory before going to the sky platform
 		if hasToolInInventory() then
 			statusLabel.Text = "Status: Waiting on sky platform (Tool found)..."
-			if not wasOnPlatform or rootPart.Position.Y < 4995 then
+			-- Teleport to the platform EXACTLY ONCE to prevent spamming and freezing
+			if not wasOnPlatform then
 				rootPart.CFrame = CFrame.new(0, 5005, 0)
 				wasOnPlatform = true
 			end
