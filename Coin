@@ -3,7 +3,6 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui", 10) or player:FindFirstChildWhichIsA("PlayerGui")
@@ -146,7 +145,7 @@ Workspace.DescendantAdded:Connect(function(descendant)
 	end
 end)
 
--- UI Setup (Expanded to accommodate Auto Vote toggle)
+-- UI Setup
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "CoinFarmerGui"
 screenGui.ResetOnSpawn = false
@@ -195,7 +194,7 @@ voteToggleButton.Font = Enum.Font.GothamBold
 voteToggleButton.Parent = mainFrame
 Instance.new("UICorner", voteToggleButton).CornerRadius = UDim.new(0, 4)
 
--- Input Box Helper with Auto-Save
+-- Input Box Helper (Non-deleting real-time update)
 local function createInputRow(labelText, defaultVal, posY, settingKey)
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(0, 90, 0, 25)
@@ -219,12 +218,19 @@ local function createInputRow(labelText, defaultVal, posY, settingKey)
 	box.Parent = mainFrame
 	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
 	
-	box.FocusLost:Connect(function()
+	-- Live change listener without auto-deleting text contents
+	box:GetPropertyChangedSignal("Text"):Connect(function()
 		local val = tonumber(box.Text)
 		if val then
 			settingsData[settingKey] = val
 			saveSettings()
-		else
+		end
+	end)
+	
+	-- Fallback if box is left blank on defocus
+	box.FocusLost:Connect(function()
+		local val = tonumber(box.Text)
+		if not val then
 			box.Text = tostring(settingsData[settingKey])
 		end
 	end)
@@ -390,7 +396,7 @@ voteToggleButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------------
--- AUTO VOTE BACKGROUND TASK (Safe Void-less Teleport)
+-- AUTO VOTE BACKGROUND TASK
 --------------------------------------------------------
 local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
 local ORDER = { 
@@ -465,7 +471,6 @@ task.spawn(function()
 						local hrp = hum and hum.RootPart
 						
 						if hrp and hum.Health > 0 and char ~= votedChar then
-							-- Safe offset positioning to avoid void drops
 							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
 							hrp.CFrame = CFrame.new(safePos)
 							
