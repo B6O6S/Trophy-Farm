@@ -3,42 +3,39 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
+local Camera = workspace.CurrentCamera
+local VirtualUser = game:GetService("VirtualUser")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui", 10) or player:FindFirstChildWhichIsA("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
 
-if not playerGui then
-	playerGui = player:WaitForChild("PlayerGui")
-end
+-- Config File Name
+local CONFIG_FILE = "EliteAutomationSettings.json"
 
--- Clean up any existing GUI from previous executions
-if playerGui:FindFirstChild("CoinFarmerGui") then
-	playerGui.CoinFarmerGui:Destroy()
-end
-
--- State Variables
-local isFarmingActive = false
-local isAutoVoteActive = false
-local currentTargetAnchor = nil
-local lastTargetPart = nil
-local votedChar = nil
-local CONFIG_FILE = "CoinFarmerSettings.json"
-
--- Default Settings
+-- Persistent Settings Data
 local settingsData = {
 	Speed = 60,
 	HeightOffset = 0,
-	AuraRadius = 8
+	AuraRadius = 12,
+	AutoFarm = false,
+	AutoVote = false,
+	ShootMurderer = false,
+	AutoKillAll = false,
+	FpsBooster = false
 }
 
--- Load Saved Settings if available
+-- Load Saved Settings
 pcall(function()
 	if readfile and isfile and isfile(CONFIG_FILE) then
 		local decoded = HttpService:JSONDecode(readfile(CONFIG_FILE))
-		if decoded then
-			settingsData.Speed = tonumber(decoded.Speed) or 60
-			settingsData.HeightOffset = tonumber(decoded.HeightOffset) or 0
-			settingsData.AuraRadius = tonumber(decoded.AuraRadius) or 8
+		if type(decoded) == "table" then
+			for k, v in pairs(decoded) do
+				settingsData[k] = v
+			end
 		end
 	end
 end)
@@ -51,18 +48,151 @@ local function saveSettings()
 	end)
 end
 
--- Function to add a Fill-Only Highlight matched to the Coin's color
+-- State Variables synced with Saved Settings
+local isFarmingActive = settingsData.AutoFarm
+local isAutoVoteActive = settingsData.AutoVote
+local isShootMurdererActive = settingsData.ShootMurderer
+local isAutoKillAllActive = settingsData.AutoKillAll
+local isFpsBoosterActive = settingsData.FpsBooster
+
+local isBagFull = false
+local hasTeleportedToPlatform = false
+local timerPlayedThisLife = false
+local weaponWaitTimer = 0
+local hadCoinsBefore = false
+
+local currentTargetAnchor = nil
+local visitedCoins = {}
+local votedChar = nil
+
+-- Reset State On Respawn
+local function onCharacterAdded(char)
+	isBagFull = false
+	hasTeleportedToPlatform = false
+	timerPlayedThisLife = false
+	weaponWaitTimer = 0
+	hadCoinsBefore = false
+	visitedCoins = {}
+end
+
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- Instant Auto-Rejoin On Kick
+local function setupAutoRejoin()
+	GuiService.ErrorMessageChanged:Connect(function()
+		local errorMessage = GuiService:GetErrorMessage()
+		if errorMessage and errorMessage ~= "" then
+			task.spawn(function()
+				while true do
+					pcall(function()
+						TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+					end)
+					task.wait(1)
+				end
+			end)
+		end
+	end)
+
+	pcall(function()
+		local coreGui = game:GetService("CoreGui")
+		coreGui.ChildAdded:Connect(function(child)
+			if child.Name == "RobloxPromptDialog" then
+				task.spawn(function()
+					while true do
+						pcall(function()
+							TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+						end)
+						task.wait(1)
+					end
+				end)
+			end
+		end)
+	end)
+end
+
+setupAutoRejoin()
+
+-- ==================== BUILT-IN FPS BOOSTER ENGINE ====================
+local originalLightingState = {}
+
+local function applyFpsBoost(enable)
+	pcall(function()
+		if enable then
+			-- Optimize Lighting
+			Lighting.GlobalShadows = false
+			Lighting.FogEnd = 9e9
+			Lighting.Technology = Enum.Technology.Compatibility
+			
+			for _, obj in ipairs(Lighting:GetChildren()) do
+				if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Clouds") or obj:IsA("Sky") then
+					obj.Enabled = false
+				end
+			end
+
+			-- Simplify Workspace Materials
+			for _, v in ipairs(Workspace:GetDescendants()) do
+				if v:IsA("BasePart") and not v:IsA("MeshPart") then
+					v.Material = Enum.Material.SmoothPlastic
+					v.Reflectance = 0
+				elseif v:IsA("Decal") or v:IsA("Texture") then
+					v.Transparency = 1
+				elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") then
+					v.Enabled = false
+				end
+			end
+
+			-- Lower Terrain detail
+			local terrain = Workspace:FindFirstChildOfClass("Terrain")
+			if terrain then
+				terrain.WaterWaveSize = 0
+				terrain.WaterWaveSpeed = 0
+				terrain.WaterReflectance = 0
+				terrain.WaterTransparency = 0
+			end
+		end
+	end)
+end
+
+-- ==================== EXACT COIN AURA METHODS ====================
+local function touch(a, b)
+	pcall(function()
+		firetouchinterest(a, b, 0)
+		firetouchinterest(a, b, 1)
+	end)
+end
+
+local function getCoinContainers()
+	local containers = {}
+	for _, map in ipairs(Workspace:GetChildren()) do
+		local container = map:FindFirstChild("CoinContainer")
+		if container then
+			table.insert(containers, container)
+		end
+	end
+	return containers
+end
+
+local function getCoinParts(containers)
+	local parts = {}
+	for _, container in ipairs(containers) do
+		for _, descendant in ipairs(container:GetDescendants()) do
+			if descendant:IsA("BasePart") and descendant:FindFirstChild("TouchInterest") then
+				table.insert(parts, descendant)
+			end
+		end
+	end
+	return parts
+end
+
+-- Highlight Function
 local function addHighlight(target)
 	if target and (target:IsA("BasePart") or target:IsA("Model")) then
 		if not target:FindFirstChild("CoinHighlight") then
 			local highlight = Instance.new("Highlight")
 			highlight.Name = "CoinHighlight"
-			
-			-- Fill-only settings (disables outline)
 			highlight.OutlineTransparency = 1
 			highlight.FillTransparency = 0.35
 			
-			-- Match color to the coin
 			local function updateColor()
 				if target:IsA("BasePart") then
 					highlight.FillColor = target.Color
@@ -71,7 +201,7 @@ local function addHighlight(target)
 					if primary then
 						highlight.FillColor = primary.Color
 					else
-						highlight.FillColor = Color3.fromRGB(255, 215, 0) -- Fallback gold
+						highlight.FillColor = Color3.fromRGB(255, 215, 0)
 					end
 				end
 			end
@@ -89,12 +219,10 @@ local function addHighlight(target)
 	end
 end
 
--- Check if an object is a target coin (Coin_Server or CoinVisual)
 local function isTargetCoin(desc)
 	return desc.Name == "Coin_Server" or desc.Name == "CoinVisual"
 end
 
--- Check if a coin is fading/transparent (collected)
 local function isCoinFading(part)
 	if not part or not part.Parent then return true end
 	if part:IsA("BasePart") then
@@ -106,7 +234,42 @@ local function isCoinFading(part)
 	return false
 end
 
--- Scan and highlight ONLY target coins in any map's CoinContainer
+-- Tool & Weapon Identification
+local function getGun()
+	local char = LocalPlayer.Character
+	if char and char:FindFirstChild("Gun") then return char.Gun end
+	local bp = LocalPlayer:FindFirstChild("Backpack")
+	if bp and bp:FindFirstChild("Gun") then return bp.Gun end
+	if char and char:FindFirstChild("Revolver") then return char.Revolver end
+	if bp and bp:FindFirstChild("Revolver") then return bp.Revolver end
+end
+
+local function hasGun()
+	return getGun() ~= nil
+end
+
+local function getKnife()
+	local char = LocalPlayer.Character
+	if char then
+		local k = char:FindFirstChild("Knife")
+		if k then return k end
+	end
+	local bp = LocalPlayer:FindFirstChild("Backpack")
+	if bp then
+		local k = bp:FindFirstChild("Knife")
+		if k then return k end
+	end
+	return nil
+end
+
+local function hasKnife()
+	return getKnife() ~= nil
+end
+
+local function hasWeapon()
+	return hasKnife() or hasGun()
+end
+
 local function highlightCoins()
 	for _, map in ipairs(Workspace:GetChildren()) do
 		local container = map:FindFirstChild("CoinContainer")
@@ -122,7 +285,6 @@ end
 
 highlightCoins()
 
--- Watch for newly added target coins across any map
 Workspace.DescendantAdded:Connect(function(descendant)
 	if isTargetCoin(descendant) then
 		task.wait(0.1)
@@ -130,130 +292,325 @@ Workspace.DescendantAdded:Connect(function(descendant)
 	end
 end)
 
--- UI Setup
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "CoinFarmerGui"
-screenGui.ResetOnSpawn = false
-screenGui.DisplayOrder = 99999
-screenGui.Parent = playerGui
+-- Sky Platform Creation
+local skyPlatform = Instance.new("Part")
+skyPlatform.Name = "CoinFarmerSkyPlatform"
+skyPlatform.Size = Vector3.new(30, 1, 30)
+skyPlatform.Position = Vector3.new(0, 5000, 0)
+skyPlatform.Anchored = true
+skyPlatform.Transparency = 0.7
+skyPlatform.Color = Color3.fromRGB(163, 162, 165)
+skyPlatform.Material = Enum.Material.SmoothPlastic
+skyPlatform.Parent = Workspace
 
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 280)
-mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
+--------------------------------------------------------
+-- GUI CREATION WITH SAVED STATES & LIVE TIMER
+--------------------------------------------------------
+local speedInput, heightInput, radiusInput, statusLabel, timerLabel
 
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+task.spawn(function()
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui", 30)
+	if not playerGui then return end
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 35)
-title.BackgroundTransparency = 1
-title.Text = "Coin Farmer + Auto Vote"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 15
-title.Font = Enum.Font.GothamBold
-title.Parent = mainFrame
+	if playerGui:FindFirstChild("EliteAutomationGui") then
+		playerGui.EliteAutomationGui:Destroy()
+	end
 
-local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(1, -20, 0, 30)
-toggleButton.Position = UDim2.new(0, 10, 0, 40)
-toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.Text = "Farmer Toggle: OFF"
-toggleButton.TextSize = 13
-toggleButton.Font = Enum.Font.GothamBold
-toggleButton.Parent = mainFrame
-Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 4)
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "EliteAutomationGui"
+	screenGui.ResetOnSpawn = false
+	screenGui.DisplayOrder = 99999
+	screenGui.IgnoreGuiInset = true
+	screenGui.Parent = playerGui
 
-local voteToggleButton = Instance.new("TextButton")
-voteToggleButton.Size = UDim2.new(1, -20, 0, 30)
-voteToggleButton.Position = UDim2.new(0, 10, 0, 75)
-voteToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-voteToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-voteToggleButton.Text = "Auto Vote: OFF"
-voteToggleButton.TextSize = 13
-voteToggleButton.Font = Enum.Font.GothamBold
-voteToggleButton.Parent = mainFrame
-Instance.new("UICorner", voteToggleButton).CornerRadius = UDim.new(0, 4)
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Size = UDim2.new(0, 260, 0, 520)
+	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Active = true
+	mainFrame.Draggable = true
+	mainFrame.Parent = screenGui
 
--- Input Box Helper (Non-deleting real-time update)
-local function createInputRow(labelText, defaultVal, posY, settingKey)
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 90, 0, 25)
-	label.Position = UDim2.new(0, 10, 0, posY)
-	label.BackgroundTransparency = 1
-	label.Text = labelText
-	label.TextColor3 = Color3.fromRGB(200, 200, 200)
-	label.TextSize = 14
-	label.Font = Enum.Font.Gotham
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = mainFrame
+	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
 
-	local box = Instance.new("TextBox")
-	box.Size = UDim2.new(0, 100, 0, 25)
-	box.Position = UDim2.new(0, 110, 0, posY)
-	box.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-	box.TextColor3 = Color3.fromRGB(255, 255, 255)
-	box.Text = tostring(defaultVal)
-	box.TextSize = 14
-	box.Font = Enum.Font.Gotham
-	box.Parent = mainFrame
-	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
-	
-	-- Live change listener without auto-deleting text contents
-	box:GetPropertyChangedSignal("Text"):Connect(function()
-		local val = tonumber(box.Text)
-		if val then
-			settingsData[settingKey] = val
-			saveSettings()
+	local mainStroke = Instance.new("UIStroke")
+	mainStroke.Color = Color3.fromRGB(70, 70, 110)
+	mainStroke.Thickness = 1.5
+	mainStroke.Parent = mainFrame
+
+	local headerFrame = Instance.new("Frame")
+	headerFrame.Size = UDim2.new(1, 0, 0, 45)
+	headerFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+	headerFrame.BorderSizePixel = 0
+	headerFrame.Parent = mainFrame
+
+	Instance.new("UICorner", headerFrame).CornerRadius = UDim.new(0, 10)
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(1, 0, 1, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "⚡ ELITE AUTOMATION HUB"
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.TextSize = 14
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.Parent = headerFrame
+
+	local contentContainer = Instance.new("ScrollingFrame")
+	contentContainer.Size = UDim2.new(1, -16, 1, -55)
+	contentContainer.Position = UDim2.new(0, 8, 0, 50)
+	contentContainer.BackgroundTransparency = 1
+	contentContainer.BorderSizePixel = 0
+	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 520)
+	contentContainer.ScrollBarThickness = 3
+	contentContainer.Parent = mainFrame
+
+	local function updateToggleVisual(btn, state, text)
+		if state then
+			btn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+			btn.Text = text .. ": ON"
+		else
+			btn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+			btn.Text = text .. ": OFF"
+		end
+	end
+
+	local function createButton(text, posY, initialState)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, 34)
+		btn.Position = UDim2.new(0, 0, 0, posY)
+		btn.TextSize = 13
+		btn.Font = Enum.Font.GothamSemibold
+		btn.Parent = contentContainer
+		
+		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+		
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(70, 70, 95)
+		stroke.Thickness = 1
+		stroke.Parent = btn
+
+		updateToggleVisual(btn, initialState, text)
+		return btn
+	end
+
+	local farmerBtn = createButton("Auto Farm", 5, isFarmingActive)
+	local voteBtn = createButton("Auto Vote", 45, isAutoVoteActive)
+	local shootBtn = createButton("Shoot Murderer", 85, isShootMurdererActive)
+	local killBtn = createButton("Auto Kill All", 125, isAutoKillAllActive)
+	local fpsBtn = createButton("FPS Booster", 165, isFpsBoosterActive)
+
+	local function createInput(labelText, defaultVal, posY, settingKey)
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0, 120, 0, 30)
+		label.Position = UDim2.new(0, 0, 0, posY)
+		label.BackgroundTransparency = 1
+		label.Text = labelText
+		label.TextColor3 = Color3.fromRGB(180, 180, 200)
+		label.TextSize = 13
+		label.Font = Enum.Font.GothamMedium
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.Parent = contentContainer
+
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(0, 110, 0, 30)
+		box.Position = UDim2.new(1, -110, 0, posY)
+		box.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+		box.TextColor3 = Color3.fromRGB(255, 255, 255)
+		box.Text = tostring(defaultVal)
+		box.TextSize = 13
+		box.Font = Enum.Font.Gotham
+		box.Parent = contentContainer
+		
+		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+		
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(60, 60, 85)
+		stroke.Thickness = 1
+		stroke.Parent = box
+		
+		box:GetPropertyChangedSignal("Text"):Connect(function()
+			local val = tonumber(box.Text)
+			if val then
+				settingsData[settingKey] = val
+				saveSettings()
+			end
+		end)
+		
+		box.FocusLost:Connect(function()
+			local val = tonumber(box.Text)
+			if not val then
+				box.Text = tostring(settingsData[settingKey])
+			end
+		end)
+		
+		return box
+	end
+
+	speedInput = createInput("Speed", settingsData.Speed, 215, "Speed")
+	heightInput = createInput("Height Offset", settingsData.HeightOffset, 255, "HeightOffset")
+	radiusInput = createInput("Aura Radius", settingsData.AuraRadius, 295, "AuraRadius")
+
+	-- Status Box
+	local statusBox = Instance.new("Frame")
+	statusBox.Size = UDim2.new(1, 0, 0, 45)
+	statusBox.Position = UDim2.new(0, 0, 0, 340)
+	statusBox.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
+	statusBox.BorderSizePixel = 0
+	statusBox.Parent = contentContainer
+
+	Instance.new("UICorner", statusBox).CornerRadius = UDim.new(0, 6)
+
+	local statusTitle = Instance.new("TextLabel")
+	statusTitle.Size = UDim2.new(1, -10, 0, 16)
+	statusTitle.Position = UDim2.new(0, 5, 0, 3)
+	statusTitle.BackgroundTransparency = 1
+	statusTitle.Text = "SYSTEM STATUS"
+	statusTitle.TextColor3 = Color3.fromRGB(140, 140, 170)
+	statusTitle.TextSize = 10
+	statusTitle.Font = Enum.Font.GothamBold
+	statusTitle.TextXAlignment = Enum.TextXAlignment.Left
+	statusTitle.Parent = statusBox
+
+	statusLabel = Instance.new("TextLabel")
+	statusLabel.Size = UDim2.new(1, -10, 0, 20)
+	statusLabel.Position = UDim2.new(0, 5, 0, 20)
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Text = "Idle / Ready"
+	statusLabel.TextColor3 = Color3.fromRGB(0, 255, 170)
+	statusLabel.TextSize = 12
+	statusLabel.Font = Enum.Font.GothamMedium
+	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+	statusLabel.Parent = statusBox
+
+	-- Live Timer Box
+	local timerBox = Instance.new("Frame")
+	timerBox.Size = UDim2.new(1, 0, 0, 45)
+	timerBox.Position = UDim2.new(0, 0, 0, 392)
+	timerBox.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
+	timerBox.BorderSizePixel = 0
+	timerBox.Parent = contentContainer
+
+	Instance.new("UICorner", timerBox).CornerRadius = UDim.new(0, 6)
+
+	local timerTitle = Instance.new("TextLabel")
+	timerTitle.Size = UDim2.new(1, -10, 0, 16)
+	timerTitle.Position = UDim2.new(0, 5, 0, 3)
+	timerTitle.BackgroundTransparency = 1
+	timerTitle.Text = "ACTIVE TIMER / STATUS"
+	timerTitle.TextColor3 = Color3.fromRGB(140, 140, 170)
+	timerTitle.TextSize = 10
+	timerTitle.Font = Enum.Font.GothamBold
+	timerTitle.TextXAlignment = Enum.TextXAlignment.Left
+	timerTitle.Parent = timerBox
+
+	timerLabel = Instance.new("TextLabel")
+	timerLabel.Size = UDim2.new(1, -10, 0, 20)
+	timerLabel.Position = UDim2.new(0, 5, 0, 20)
+	timerLabel.BackgroundTransparency = 1
+	timerLabel.Text = "00.0s (Inactive)"
+	timerLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	timerLabel.TextSize = 12
+	timerLabel.Font = Enum.Font.GothamBold
+	timerLabel.TextXAlignment = Enum.TextXAlignment.Left
+	timerLabel.Parent = timerBox
+
+	-- Apply initial saved FPS Booster setting
+	if isFpsBoosterActive then
+		applyFpsBoost(true)
+	end
+
+	farmerBtn.MouseButton1Click:Connect(function()
+		isFarmingActive = not isFarmingActive
+		settingsData.AutoFarm = isFarmingActive
+		saveSettings()
+		updateToggleVisual(farmerBtn, isFarmingActive, "Auto Farm")
+		
+		local character, rootPart, humanoid = LocalPlayer.Character, LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"), LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+		if isFarmingActive then
+			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
+		else
+			statusLabel.Text = "Idle / Ready"
+			timerLabel.Text = "00.0s (Inactive)"
+			visitedCoins = {}
+			hasTeleportedToPlatform = false
+			isBagFull = false
+			weaponWaitTimer = 0
+			hadCoinsBefore = false
+			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
+			if rootPart and rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
+			if character then
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then part.CanCollide = true end
+				end
+			end
+			if humanoid then
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+			end
 		end
 	end)
-	
-	-- Fallback if box is left blank on defocus
-	box.FocusLost:Connect(function()
-		local val = tonumber(box.Text)
-		if not val then
-			box.Text = tostring(settingsData[settingKey])
-		end
+
+	voteBtn.MouseButton1Click:Connect(function()
+		isAutoVoteActive = not isAutoVoteActive
+		settingsData.AutoVote = isAutoVoteActive
+		saveSettings()
+		updateToggleVisual(voteBtn, isAutoVoteActive, "Auto Vote")
+	end)
+
+	shootBtn.MouseButton1Click:Connect(function()
+		isShootMurdererActive = not isShootMurdererActive
+		settingsData.ShootMurderer = isShootMurdererActive
+		saveSettings()
+		updateToggleVisual(shootBtn, isShootMurdererActive, "Shoot Murderer")
+	end)
+
+	killBtn.MouseButton1Click:Connect(function()
+		isAutoKillAllActive = not isAutoKillAllActive
+		settingsData.AutoKillAll = isAutoKillAllActive
+		saveSettings()
+		updateToggleVisual(killBtn, isAutoKillAllActive, "Auto Kill All")
+	end)
+
+	fpsBtn.MouseButton1Click:Connect(function()
+		isFpsBoosterActive = not isFpsBoosterActive
+		settingsData.FpsBooster = isFpsBoosterActive
+		saveSettings()
+		updateToggleVisual(fpsBtn, isFpsBoosterActive, "FPS Booster")
+		applyFpsBoost(isFpsBoosterActive)
+	end)
+end)
+
+--------------------------------------------------------
+-- REQUESTED AUTO FIRE FUNCTION
+--------------------------------------------------------
+local function performAutoFire(mousePos)
+	pcall(function()
+		VirtualUser:Button1Down(mousePos)
+		VirtualUser:Button1Up(mousePos)
 	end)
 	
-	return box
+	local character = LocalPlayer.Character
+	if character then
+		local tool = character:FindFirstChildOfClass("Tool")
+		if tool then
+			tool:Activate()
+		end
+	end
 end
 
-local speedBox = createInputRow("Speed:", settingsData.Speed, 115, "Speed")
-local heightBox = createInputRow("Height Offset:", settingsData.HeightOffset, 155, "HeightOffset")
-local radiusBox = createInputRow("Aura Radius:", settingsData.AuraRadius, 195, "AuraRadius")
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -20, 0, 25)
-statusLabel.Position = UDim2.new(0, 10, 0, 240)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Status: Idle"
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statusLabel.TextSize = 12
-statusLabel.Font = Enum.Font.GothamMedium
-statusLabel.Parent = mainFrame
-
--- Helper Functions
+--------------------------------------------------------
+-- HELPER COMBAT METHODS
+--------------------------------------------------------
 local function getCharacterParts()
-	local character = player.Character
+	local character = LocalPlayer.Character
 	if not character then return nil, nil, nil end
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character:FindFirstChild("Humanoid")
 	return character, rootPart, humanoid
 end
 
-local function touch(a, b)
-	pcall(function()
-		firetouchinterest(a, b, 0)
-		firetouchinterest(a, b, 1)
-	end)
-end
-
--- Helper to extract the exact CFrame of the coin object
 local function getExactCoinCFrame(coinObj)
 	if coinObj and coinObj.Parent then
 		if coinObj:IsA("BasePart") then
@@ -263,22 +620,19 @@ local function getExactCoinCFrame(coinObj)
 				return coinObj.PrimaryPart.CFrame
 			else
 				local part = coinObj:FindFirstChildWhichIsA("BasePart", true)
-				if part then
-					return part.CFrame
-				end
+				if part then return part.CFrame end
 			end
 		end
 	end
 	return nil
 end
 
--- Helper to create or move the target anchor part to the exact CFrame
 local function updateTargetAnchor(cframe)
 	if not currentTargetAnchor or not currentTargetAnchor.Parent then
 		currentTargetAnchor = Instance.new("Part")
 		currentTargetAnchor.Name = "TargetCoinAnchor"
 		currentTargetAnchor.Size = Vector3.new(1, 1, 1)
-		currentTargetAnchor.Transparency = 1 -- Invisible
+		currentTargetAnchor.Transparency = 1
 		currentTargetAnchor.CanCollide = false
 		currentTargetAnchor.Anchored = true
 		currentTargetAnchor.Parent = Workspace
@@ -287,90 +641,92 @@ local function updateTargetAnchor(cframe)
 	return currentTargetAnchor.Position
 end
 
--- Container & Coin Part Functions
-local function getCoinContainers()
-	local containers = {}
-	for _, map in ipairs(Workspace:GetChildren()) do
-		local container = map:FindFirstChild("CoinContainer")
-		if container then
-			table.insert(containers, container)
-		end
-	end
-	return containers
-end
-
-local function getCoinParts(containers)
-	local parts = {}
-	for _, container in ipairs(containers) do
-		for _, descendant in ipairs(container:GetDescendants()) do
-			if isTargetCoin(descendant) then
-				if descendant:IsA("BasePart") and descendant:FindFirstChild("TouchInterest") then
-					table.insert(parts, descendant)
-				elseif descendant:IsA("Model") then
-					local part = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
-					if part and part:FindFirstChild("TouchInterest") then
-						table.insert(parts, part)
-					end
+local function equipGun()
+	local gun = getGun()
+	if not gun then return false end
+	if gun.Parent == LocalPlayer.Character then return true end
+	if gun.Parent == LocalPlayer:FindFirstChild("Backpack") then
+		local char = LocalPlayer.Character
+		if char then
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid:EquipTool(gun)
+				for _ = 1, 10 do
+					task.wait(0.1)
+					if gun.Parent == char then return true end
 				end
 			end
 		end
 	end
-	return parts
+	return false
 end
 
--- Farmer Toggle Handler
-toggleButton.MouseButton1Click:Connect(function()
-	isFarmingActive = not isFarmingActive
-	local character, rootPart, humanoid = getCharacterParts()
+local function unequipGun()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local gun = getGun()
+	if gun and gun.Parent == char then
+		local backpack = LocalPlayer:FindFirstChild("Backpack")
+		if backpack then gun.Parent = backpack end
+	end
+end
 
-	if isFarmingActive then
-		toggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
-		toggleButton.Text = "Farmer Toggle: ON"
-		if humanoid then
-			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+local function getMurd()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local bp = plr:FindFirstChild("Backpack")
+			local char = plr.Character
+			if (bp and bp:FindFirstChild("Knife")) or (char and char:FindFirstChild("Knife")) then
+				return plr
+			end
 		end
-	else
-		toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-		toggleButton.Text = "Farmer Toggle: OFF"
-		statusLabel.Text = "Status: Idle"
-		lastTargetPart = nil
+	end
+	return nil
+end
+
+local function shootMurd()
+	if not equipGun() then return end
+	task.wait(0.2)
+	
+	local murd = getMurd()
+	local screenPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+	
+	if murd and murd.Character and murd.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+		local hrp = LocalPlayer.Character.HumanoidRootPart
+		local mHrp = murd.Character.HumanoidRootPart
+		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, hrp.Position.Y, mHrp.Position.Z))
 		
-		if currentTargetAnchor then
-			currentTargetAnchor:Destroy()
-			currentTargetAnchor = nil
-		end
-		if rootPart and rootPart:FindFirstChild("SmoothFarmVelocity") then
-			rootPart.SmoothFarmVelocity:Destroy()
-		end
-		if character then
-			for _, part in ipairs(character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.CanCollide = true
-				end
-			end
-		end
-		if humanoid then
-			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		-- Convert target 3D world position to Viewport 2D position for VirtualUser
+		local viewportPoint, onScreen = Camera:WorldToViewportPoint(mHrp.Position)
+		if onScreen then
+			screenPos = Vector2.new(viewportPoint.X, viewportPoint.Y)
 		end
 	end
-end)
+	
+	-- Fire using performAutoFire
+	performAutoFire(screenPos)
+end
 
--- Auto Vote Toggle Handler
-voteToggleButton.MouseButton1Click:Connect(function()
-	isAutoVoteActive = not isAutoVoteActive
-	if isAutoVoteActive then
-		voteToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
-		voteToggleButton.Text = "Auto Vote: ON"
-	else
-		voteToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-		voteToggleButton.Text = "Auto Vote: OFF"
+local function killAll()
+	local knife = getKnife()
+	if not knife then return end
+	local events = knife:FindFirstChild("Events")
+	if not events then return end
+	local handleTouched = events:FindFirstChild("HandleTouched")
+	if not handleTouched then return end
+	local targets = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Character then
+			local upperTorso = p.Character:FindFirstChild("UpperTorso")
+			if upperTorso then table.insert(targets, upperTorso) end
+		end
 	end
-end)
+	for _, upperTorso in ipairs(targets) do
+		handleTouched:FireServer(upperTorso)
+	end
+end
 
---------------------------------------------------------
--- AUTO VOTE BACKGROUND TASK
---------------------------------------------------------
+-- Auto Vote Task
 local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
 local ORDER = { 
 	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
@@ -394,9 +750,7 @@ for i, name in ipairs(ORDER) do
 	local full = normalize(name)
 	local base = stripParen(full)
 	RANK_SMALL[full] = i
-	if not RANK_SMALL[base] then 
-		RANK_SMALL[base] = i + 0.05 
-	end
+	if not RANK_SMALL[base] then RANK_SMALL[base] = i + 0.05 end
 end
 
 local function getOpenPads()
@@ -423,9 +777,7 @@ local function pickSmallest(open)
 		local low = normalize(p.map)
 		local clean = stripParen(low)
 		local score = RANK_SMALL[low] or RANK_SMALL[clean] or 999
-		if score < bestScore then
-			best, bestScore = p, score
-		end
+		if score < bestScore then best, bestScore = p, score end
 	end
 	return best
 end
@@ -439,23 +791,21 @@ task.spawn(function()
 				if #open > 0 then
 					local target = pickSmallest(open)
 					if target and target.trigger and target.trigger.Parent then
-						local char = player.Character
+						local char = LocalPlayer.Character
 						local hum = char and char:FindFirstChildOfClass("Humanoid")
 						local hrp = hum and hum.RootPart
-						
 						if hrp and hum.Health > 0 and char ~= votedChar then
+							hasTeleportedToPlatform = false
 							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
 							hrp.CFrame = CFrame.new(safePos)
-							
 							if firetouchinterest then
 								pcall(firetouchinterest, hrp, target.trigger, 0)
 								pcall(firetouchinterest, hrp, target.trigger, 1)
 							end
-							
 							task.wait(0.12)
-							
 							if hum and hum.Health > 0 then
 								votedChar = char
+								hasTeleportedToPlatform = false
 								hum:ChangeState(Enum.HumanoidStateType.Dead)
 								hum.Health = 0
 							end
@@ -470,21 +820,32 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------
--- MAIN FARMING LOOP (Instant First Spawn TP & Fast Skip)
+-- MAIN HEARTBEAT AUTOMATION LOOP
 --------------------------------------------------------
-RunService.Heartbeat:Connect(function()
-	if not isFarmingActive then return end
-	
+RunService.Heartbeat:Connect(function(dt)
 	local character, rootPart, humanoid = getCharacterParts()
-	if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
+	
+	-- 1. COIN AURA IMPLEMENTATION
+	if character and rootPart then
+		local radius = (radiusInput and tonumber(radiusInput.Text)) or settingsData.AuraRadius
+		local rootPos = rootPart.Position
+		local containers = getCoinContainers()
+		local coinParts = getCoinParts(containers)
+		
+		for _, part in ipairs(coinParts) do
+			if (rootPos - part.Position).Magnitude <= radius then
+				touch(rootPart, part)
+			end
+		end
+	end
+
+	if not isFarmingActive then return end
+	if not character or not rootPart or not humanoid or humanoid.Health > 0 == false then
 		return
 	end
 
-	-- 1. Noclip: Disables wall collision across all character parts continuously
 	for _, part in ipairs(character:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.CanCollide = false
-		end
+		if part:IsA("BasePart") then part.CanCollide = false end
 	end
 
 	local bv = rootPart:FindFirstChild("SmoothFarmVelocity")
@@ -496,39 +857,106 @@ RunService.Heartbeat:Connect(function()
 		bv.Parent = rootPart
 	end
 
-	local rootPos = rootPart.Position
-	local currentRadius = tonumber(radiusBox.Text) or settingsData.AuraRadius
+	-- Scan Active Map Coins
 	local containers = getCoinContainers()
-	local coinParts = getCoinParts(containers)
-
-	-- 2. TouchInterest Coin Aura Execution
-	for _, part in ipairs(coinParts) do
-		if not isCoinFading(part) then
-			if (rootPos - part.Position).Magnitude <= currentRadius then
-				touch(rootPart, part)
-			end
-		end
-	end
-
-	-- 3. Find closest valid coin part that is NOT fading/transparent and NOT the one we just finished
-	local closestPart = nil
-	local closestCF = nil
-	local shortestDistance = math.huge
-
 	local allDescendants = {}
 	for _, container in ipairs(containers) do
 		for _, desc in ipairs(container:GetDescendants()) do
-			if isTargetCoin(desc) then
-				table.insert(allDescendants, desc)
+			if isTargetCoin(desc) then table.insert(allDescendants, desc) end
+		end
+	end
+
+	local unvisitedCount = 0
+	for _, part in ipairs(allDescendants) do
+		if not isCoinFading(part) and not visitedCoins[part] then unvisitedCount = unvisitedCount + 1 end
+	end
+	if unvisitedCount == 0 then visitedCoins = {} end
+
+	local activeCoinsExist = false
+	for _, part in ipairs(allDescendants) do
+		if not isCoinFading(part) then
+			activeCoinsExist = true
+			break
+		end
+	end
+
+	-- ============ COIN DETECTION & "GONE TO FULL" LOGIC ============
+	if activeCoinsExist then
+		hadCoinsBefore = true
+		weaponWaitTimer = 0
+		if timerLabel then timerLabel.Text = "Farming Coins..." end
+	else
+		if hadCoinsBefore then
+			isBagFull = true
+			if timerLabel then timerLabel.Text = "Coins Gone (Bag Full)" end
+		else
+			if hasWeapon() and not isBagFull then
+				if not timerPlayedThisLife then
+					weaponWaitTimer = weaponWaitTimer + dt
+					local remainingSeconds = math.max(0, 11 - weaponWaitTimer)
+					
+					if statusLabel then statusLabel.Text = "Status: Checking Inventory..." end
+					if timerLabel then timerLabel.Text = string.format("%.1fs remaining", remainingSeconds) end
+
+					if weaponWaitTimer >= 11 then
+						isBagFull = true
+						timerPlayedThisLife = true
+						if timerLabel then timerLabel.Text = "11.0s Complete (Bag Full)" end
+					end
+				else
+					isBagFull = true
+					if timerLabel then timerLabel.Text = "Bag Full (Completed)" end
+				end
+			elseif not hasWeapon() and not activeCoinsExist then
+				if statusLabel then statusLabel.Text = "Status: Waiting for Coins..." end
+				if timerLabel then timerLabel.Text = "00.0s (No Weapon)" end
 			end
 		end
 	end
 
+	-- ============ STRICT SKY PLATFORM TELEPORT ============
+	if isBagFull then
+		if statusLabel then statusLabel.Text = "Status: Bag Full! Resting on Platform..." end
+		visitedCoins = {}
+		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
+		bv.Velocity = Vector3.zero
+		
+		if not hasTeleportedToPlatform or rootPart.Position.Y < 4995 then
+			rootPart.CFrame = CFrame.new(0, 5005, 0)
+			hasTeleportedToPlatform = true
+		end
+
+		-- Trigger Combat Actions once rested on platform if bag is full
+		if hasKnife() and isAutoKillAllActive then
+			pcall(killAll)
+		elseif hasGun() and isShootMurdererActive then
+			pcall(function()
+				local murd = getMurd()
+				if murd and murd.Character and murd.Character:FindFirstChildOfClass("Humanoid") then
+					if murd.Character.Humanoid.Health > 0 then
+						shootMurd()
+						task.wait(0.5)
+						unequipGun()
+					end
+				end
+			end)
+		end
+
+		return
+	else
+		hasTeleportedToPlatform = false
+	end
+
+	-- ============ ACTIVE COIN FARMING MOVEMENT ============
+	local closestPart, closestCF = nil, nil
+	local shortestDistance = math.huge
+	local rootPos = rootPart.Position
+
 	for _, part in ipairs(allDescendants) do
-		if not isCoinFading(part) and part ~= lastTargetPart then
+		if not isCoinFading(part) and not visitedCoins[part] then
 			local cf = getExactCoinCFrame(part)
 			if cf then
-				local heightOffset = tonumber(heightBox.Text) or settingsData.HeightOffset
+				local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
 				local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
 				local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
 
@@ -541,73 +969,33 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	-- If no valid target found because lastTargetPart blocked it, reset tracker so it can instantly target new spawns
-	if not closestPart and lastTargetPart then
-		lastTargetPart = nil
-		for _, part in ipairs(allDescendants) do
-			if not isCoinFading(part) then
-				local cf = getExactCoinCFrame(part)
-				if cf then
-					local heightOffset = tonumber(heightBox.Text) or settingsData.HeightOffset
-					local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
-					local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
-
-					if distanceToTarget < shortestDistance then
-						shortestDistance = distanceToTarget
-						closestPart = part
-						closestCF = cf
-					end
-				end
-			end
-		end
-	end
-
 	if closestPart and closestCF then
-		statusLabel.Text = "Status: Farming..."
-		
-		-- Create / position anchor part at exact target coin CFrame
+		if statusLabel then statusLabel.Text = "Status: Fluid Farming Coins..." end
 		local exactCoinPos = updateTargetAnchor(closestCF)
-		
-		local speed = tonumber(speedBox.Text) or settingsData.Speed
-		local heightOffset = tonumber(heightBox.Text) or settingsData.HeightOffset
+		local speed = (speedInput and tonumber(speedInput.Text)) or settingsData.Speed
+		local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
 		local finalTargetPos = exactCoinPos + Vector3.new(0, heightOffset, 0)
 
-		-- Prevent humanoid from auto-getting up mid-farming
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
 
-		-- Accurate coin movement with forced laying posture (90-degree back rotation)
 		local targetPosition = finalTargetPos
 		local currentPosition = rootPart.Position
 		local distance = (targetPosition - currentPosition).Magnitude
 
 		if distance >= 500 then
-			-- Instant Teleport when the first coin spawns or is very far away
 			rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
 			bv.Velocity = Vector3.zero
 		else
 			local direction = targetPosition - currentPosition
+			bv.Velocity = direction.Unit * speed
+			rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
 
-			if distance > 0.15 then
-				-- Move smoothly toward the exact target while laying on back
-				bv.Velocity = direction.Unit * speed
-				rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
-			else
-				-- Instantly snap, mark as finished, and skip to the next coin without delay
-				bv.Velocity = Vector3.zero
-				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
-				lastTargetPart = closestPart
+			if distance <= 2.5 then
+				visitedCoins[closestPart] = true
 			end
 		end
 	else
-		-- Reset trackers when completely out of coins
-		lastTargetPart = nil
-		
-		if currentTargetAnchor then
-			currentTargetAnchor:Destroy()
-			currentTargetAnchor = nil
-		end
-		
+		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		bv.Velocity = Vector3.zero
-		statusLabel.Text = "Status: Waiting for coins..."
 	end
 end)
