@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
+local Stats = game:GetService("Stats")
 local Camera = Workspace.CurrentCamera
 local VirtualUser = game:GetService("VirtualUser")
 
@@ -59,14 +60,16 @@ local isAutoRejoinActive = settingsData.AutoRejoin
 
 local isBagFull = false
 local hasTeleportedToSafeZone = false
-local timerPlayedThisLife = false
-local weaponWaitTimer = 0
-local hadCoinsBefore = false
+local coinsThisSpawn = 0
+local BAG_MAX_COINS = 50
 
--- Coins Per Hour Tracker Variables
+-- Coins Per Hour & Performance Tracker Variables
 local farmStartTime = tick()
 local coinsCollectedSession = 0
-local initialCoins = 0
+local frameCount = 0
+local lastFpsUpdate = tick()
+local currentFps = 60
+local trackedPickupCoins = {}
 
 local currentTargetAnchor = nil
 local visitedCoins = {}
@@ -81,30 +84,12 @@ local clickState = false
 local function onCharacterAdded(char)
 	isBagFull = false
 	hasTeleportedToSafeZone = false
-	timerPlayedThisLife = false
-	weaponWaitTimer = 0
-	hadCoinsBefore = false
+	coinsThisSpawn = 0
 	visitedCoins = {}
+	trackedPickupCoins = {}
 end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-
--- Track Leaderstats Coins
-task.spawn(function()
-	local leaderstats = LocalPlayer:WaitForChild("leaderstats", 10)
-	if leaderstats then
-		local coinsStat = leaderstats:FindFirstChild("Coins") or leaderstats:FindFirstChild("Coin")
-		if coinsStat then
-			initialCoins = coinsStat.Value
-			coinsStat.Changed:Connect(function(newVal)
-				if newVal > initialCoins then
-					coinsCollectedSession = coinsCollectedSession + (newVal - initialCoins)
-				end
-				initialCoins = newVal
-			end)
-		end
-	end
-end)
 
 -- Instant Auto-Rejoin On Kick
 local function attemptRejoin()
@@ -139,11 +124,10 @@ end
 
 setupAutoRejoin()
 
--- ==================== FPS BOOSTER ENGINE (MATERIALS PRESERVED) ====================
+-- ==================== FPS BOOSTER ENGINE ====================
 local function applyFpsBoost(enable)
 	pcall(function()
 		if enable then
-			-- Disable Lighting Effects & Shadows while keeping original materials
 			Lighting.GlobalShadows = false
 			Lighting.FogEnd = 9e9
 			Lighting.Technology = Enum.Technology.Compatibility
@@ -154,7 +138,6 @@ local function applyFpsBoost(enable)
 				end
 			end
 
-			-- Destroy Light Sources & Heavy Particle Emitters
 			for _, v in ipairs(Workspace:GetDescendants()) do
 				if v:IsA("PointLight") or v:IsA("SpotLight") or v:IsA("SurfaceLight") then
 					v:Destroy()
@@ -163,7 +146,6 @@ local function applyFpsBoost(enable)
 				end
 			end
 
-			-- Strip Accessories/Hats from all Players
 			for _, p in ipairs(Players:GetPlayers()) do
 				if p.Character then
 					for _, acc in ipairs(p.Character:GetChildren()) do
@@ -174,7 +156,6 @@ local function applyFpsBoost(enable)
 				end
 			end
 
-			-- Lower Water Surface Reflections
 			local terrain = Workspace:FindFirstChildOfClass("Terrain")
 			if terrain then
 				terrain.WaterWaveSize = 0
@@ -186,7 +167,6 @@ local function applyFpsBoost(enable)
 	end)
 end
 
--- Strip accessories when characters spawn under FPS Booster
 Players.PlayerAdded:Connect(function(plr)
 	plr.CharacterAdded:Connect(function(char)
 		if isFpsBoosterActive then
@@ -280,14 +260,10 @@ local function hasKnife()
 	return getKnife() ~= nil
 end
 
-local function hasWeapon()
-	return hasKnife() or hasGun()
-end
-
 --------------------------------------------------------
--- COMPACT GUI CREATION (ZANWAH HUB)
+-- GUI CREATION (ZANWAH HUB)
 --------------------------------------------------------
-local speedInput, heightInput, radiusInput, statusLabel, timerLabel, cphLabel
+local speedInput, heightInput, radiusInput, statusLabel, cphLabel, headerFpsLabel, headerPingLabel
 local isMinimized = false
 
 task.spawn(function()
@@ -306,7 +282,7 @@ task.spawn(function()
 	screenGui.Parent = playerGui
 
 	local mainFrame = Instance.new("Frame")
-	mainFrame.Size = UDim2.new(0, 220, 0, 360)
+	mainFrame.Size = UDim2.new(0, 240, 0, 330)
 	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 	mainFrame.BorderSizePixel = 0
@@ -330,16 +306,41 @@ task.spawn(function()
 
 	Instance.new("UICorner", headerFrame).CornerRadius = UDim.new(0, 8)
 
+	-- Title Label
 	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.new(1, -35, 1, 0)
-	titleLabel.Position = UDim2.new(0, 8, 0, 0)
+	titleLabel.Size = UDim2.new(0, 115, 1, 0)
+	titleLabel.Position = UDim2.new(0, 6, 0, 0)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Text = "⚡ ZANWAH HUB"
 	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	titleLabel.TextSize = 11
+	titleLabel.TextSize = 10
 	titleLabel.Font = Enum.Font.GothamBold
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Parent = headerFrame
+
+	-- FPS Header Label
+	headerFpsLabel = Instance.new("TextLabel")
+	headerFpsLabel.Size = UDim2.new(0, 42, 1, 0)
+	headerFpsLabel.Position = UDim2.new(0, 118, 0, 0)
+	headerFpsLabel.BackgroundTransparency = 1
+	headerFpsLabel.Text = "60 FPS"
+	headerFpsLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+	headerFpsLabel.TextSize = 9
+	headerFpsLabel.Font = Enum.Font.GothamBold
+	headerFpsLabel.TextXAlignment = Enum.TextXAlignment.Center
+	headerFpsLabel.Parent = headerFrame
+
+	-- Ping Header Label
+	headerPingLabel = Instance.new("TextLabel")
+	headerPingLabel.Size = UDim2.new(0, 42, 1, 0)
+	headerPingLabel.Position = UDim2.new(0, 160, 0, 0)
+	headerPingLabel.BackgroundTransparency = 1
+	headerPingLabel.Text = "0ms"
+	headerPingLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+	headerPingLabel.TextSize = 9
+	headerPingLabel.Font = Enum.Font.GothamBold
+	headerPingLabel.TextXAlignment = Enum.TextXAlignment.Center
+	headerPingLabel.Parent = headerFrame
 
 	-- Minimize Button
 	local minimizeBtn = Instance.new("TextButton")
@@ -358,7 +359,7 @@ task.spawn(function()
 	contentContainer.Position = UDim2.new(0, 5, 0, 34)
 	contentContainer.BackgroundTransparency = 1
 	contentContainer.BorderSizePixel = 0
-	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 420)
+	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 380)
 	contentContainer.ScrollBarThickness = 2
 	contentContainer.Parent = mainFrame
 
@@ -366,10 +367,10 @@ task.spawn(function()
 		isMinimized = not isMinimized
 		if isMinimized then
 			contentContainer.Visible = false
-			mainFrame:TweenSize(UDim2.new(0, 220, 0, 32), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
+			mainFrame:TweenSize(UDim2.new(0, 240, 0, 32), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
 			minimizeBtn.Text = "+"
 		else
-			mainFrame:TweenSize(UDim2.new(0, 220, 0, 360), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
+			mainFrame:TweenSize(UDim2.new(0, 240, 0, 330), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
 				contentContainer.Visible = true
 			end)
 			minimizeBtn.Text = "–"
@@ -416,7 +417,7 @@ task.spawn(function()
 
 	local function createInput(labelText, defaultVal, posY, settingKey)
 		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(0, 95, 0, 24)
+		label.Size = UDim2.new(0, 105, 0, 24)
 		label.Position = UDim2.new(0, 0, 0, posY)
 		label.BackgroundTransparency = 1
 		label.Text = labelText
@@ -427,8 +428,8 @@ task.spawn(function()
 		label.Parent = contentContainer
 
 		local box = Instance.new("TextBox")
-		box.Size = UDim2.new(0, 85, 0, 24)
-		box.Position = UDim2.new(1, -85, 0, posY)
+		box.Size = UDim2.new(0, 95, 0, 24)
+		box.Position = UDim2.new(1, -95, 0, posY)
 		box.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
 		box.TextColor3 = Color3.fromRGB(255, 255, 255)
 		box.Text = tostring(defaultVal)
@@ -467,7 +468,7 @@ task.spawn(function()
 
 	-- Status Box
 	local statusBox = Instance.new("Frame")
-	statusBox.Size = UDim2.new(1, 0, 0, 28)
+	statusBox.Size = UDim2.new(1, 0, 0, 26)
 	statusBox.Position = UDim2.new(0, 0, 0, 256)
 	statusBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
 	statusBox.BorderSizePixel = 0
@@ -486,31 +487,10 @@ task.spawn(function()
 	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 	statusLabel.Parent = statusBox
 
-	-- Live Timer Box
-	local timerBox = Instance.new("Frame")
-	timerBox.Size = UDim2.new(1, 0, 0, 28)
-	timerBox.Position = UDim2.new(0, 0, 0, 288)
-	timerBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
-	timerBox.BorderSizePixel = 0
-	timerBox.Parent = contentContainer
-
-	Instance.new("UICorner", timerBox).CornerRadius = UDim.new(0, 4)
-
-	timerLabel = Instance.new("TextLabel")
-	timerLabel.Size = UDim2.new(1, -8, 1, 0)
-	timerLabel.Position = UDim2.new(0, 4, 0, 0)
-	timerLabel.BackgroundTransparency = 1
-	timerLabel.Text = "Timer: 00.0s (Inactive)"
-	timerLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-	timerLabel.TextSize = 9
-	timerLabel.Font = Enum.Font.GothamBold
-	timerLabel.TextXAlignment = Enum.TextXAlignment.Left
-	timerLabel.Parent = timerBox
-
 	-- Coins Per Hour Box
 	local cphBox = Instance.new("Frame")
-	cphBox.Size = UDim2.new(1, 0, 0, 28)
-	cphBox.Position = UDim2.new(0, 0, 0, 320)
+	cphBox.Size = UDim2.new(1, 0, 0, 26)
+	cphBox.Position = UDim2.new(0, 0, 0, 286)
 	cphBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
 	cphBox.BorderSizePixel = 0
 	cphBox.Parent = contentContainer
@@ -543,15 +523,15 @@ task.spawn(function()
 		if isFarmingActive then
 			farmStartTime = tick()
 			coinsCollectedSession = 0
+			coinsThisSpawn = 0
+			trackedPickupCoins = {}
 			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
 		else
 			statusLabel.Text = "Status: Idle / Ready"
-			timerLabel.Text = "Timer: 00.0s (Inactive)"
 			visitedCoins = {}
 			isBagFull = false
 			hasTeleportedToSafeZone = false
-			weaponWaitTimer = 0
-			hadCoinsBefore = false
+			coinsThisSpawn = 0
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 			if rootPart and rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
 			if character then
@@ -621,7 +601,43 @@ local function performAutoFire(mousePos)
 	end
 end
 
-RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function(dt)
+	-- Realtime FPS & Ping Calculation with Color Thresholds
+	frameCount = frameCount + 1
+	if tick() - lastFpsUpdate >= 1 then
+		currentFps = math.floor(frameCount / (tick() - lastFpsUpdate))
+		frameCount = 0
+		lastFpsUpdate = tick()
+		
+		-- Update FPS Header & Color
+		if headerFpsLabel then
+			headerFpsLabel.Text = currentFps .. " FPS"
+			if currentFps >= 50 then
+				headerFpsLabel.TextColor3 = Color3.fromRGB(0, 255, 120) -- Green
+			elseif currentFps >= 30 then
+				headerFpsLabel.TextColor3 = Color3.fromRGB(255, 140, 0)  -- Orange
+			else
+				headerFpsLabel.TextColor3 = Color3.fromRGB(255, 50, 50)   -- Red
+			end
+		end
+
+		-- Update Ping Header & Color
+		if headerPingLabel then
+			local pingVal = 0
+			pcall(function()
+				pingVal = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+			end)
+			headerPingLabel.Text = pingVal .. "ms"
+			if pingVal <= 150 then
+				headerPingLabel.TextColor3 = Color3.fromRGB(0, 255, 120) -- Green
+			elseif pingVal <= 199 then
+				headerPingLabel.TextColor3 = Color3.fromRGB(255, 140, 0)  -- Orange
+			else
+				headerPingLabel.TextColor3 = Color3.fromRGB(255, 50, 50)   -- Red
+			end
+		end
+	end
+
 	if not isShootMurdererActive then return end
 	
 	local character = LocalPlayer.Character
@@ -845,25 +861,44 @@ end)
 RunService.Heartbeat:Connect(function(dt)
 	local character, rootPart, humanoid = getCharacterParts()
 	
-	-- Calculate Coins Per Hour
+	-- Calculate Coins Per Hour from Verified Pickups
 	if cphLabel then
 		local elapsed = tick() - farmStartTime
 		if elapsed > 2 then
 			local coinsPerHour = math.floor((coinsCollectedSession / elapsed) * 3600)
-			cphLabel.Text = string.format("Coins/Hr: %d", coinsPerHour)
+			cphLabel.Text = string.format("Coins/Hr: %d (%d/50)", coinsPerHour, coinsThisSpawn)
 		end
 	end
 
-	-- Coin Aura
-	if character and rootPart then
+	-- Coin Verification & Verified Pickup Detection
+	if character and rootPart and isFarmingActive and not isBagFull then
 		local radius = (radiusInput and tonumber(radiusInput.Text)) or settingsData.AuraRadius
 		local rootPos = rootPart.Position
 		local containers = getCoinContainers()
 		local coinParts = getCoinParts(containers)
 		
+		for coinObj, info in pairs(trackedPickupCoins) do
+			if not info.picked then
+				if isCoinFading(coinObj) or not coinObj.Parent then
+					info.picked = true
+					coinsCollectedSession = coinsCollectedSession + 1
+					coinsThisSpawn = coinsThisSpawn + 1
+					
+					-- Trigger Bag Full upon hitting 50 coins
+					if coinsThisSpawn >= BAG_MAX_COINS then
+						isBagFull = true
+					end
+				end
+			end
+		end
+
 		for _, part in ipairs(coinParts) do
-			if (rootPos - part.Position).Magnitude <= radius then
+			local dist = (rootPos - part.Position).Magnitude
+			if dist <= radius then
 				touch(rootPart, part)
+				if dist <= 3.5 and not trackedPickupCoins[part] then
+					trackedPickupCoins[part] = { touchedAt = tick(), picked = false }
+				end
 			end
 		end
 	end
@@ -901,51 +936,9 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 	if unvisitedCount == 0 then visitedCoins = {} end
 
-	local activeCoinsExist = false
-	for _, part in ipairs(allDescendants) do
-		if not isCoinFading(part) then
-			activeCoinsExist = true
-			break
-		end
-	end
-
-	-- Coin Detection & Gone-To-Full Logic
-	if activeCoinsExist then
-		hadCoinsBefore = true
-		weaponWaitTimer = 0
-		if timerLabel then timerLabel.Text = "Timer: Farming Coins..." end
-	else
-		if hadCoinsBefore then
-			isBagFull = true
-			if timerLabel then timerLabel.Text = "Timer: Coins Gone (Bag Full)" end
-		else
-			if hasWeapon() and not isBagFull then
-				if not timerPlayedThisLife then
-					weaponWaitTimer = weaponWaitTimer + dt
-					local remainingSeconds = math.max(0, 18 - weaponWaitTimer)
-					
-					if statusLabel then statusLabel.Text = "Status: Checking Inventory..." end
-					if timerLabel then timerLabel.Text = string.format("Timer: %.1fs remaining", remainingSeconds) end
-
-					if weaponWaitTimer >= 18 then
-						isBagFull = true
-						timerPlayedThisLife = true
-						if timerLabel then timerLabel.Text = "Timer: Complete (Bag Full)" end
-					end
-				else
-					isBagFull = true
-					if timerLabel then timerLabel.Text = "Timer: Bag Full" end
-				end
-			elseif not hasWeapon() and not activeCoinsExist then
-				if statusLabel then statusLabel.Text = "Status: Waiting for Coins..." end
-				if timerLabel then timerLabel.Text = "Timer: 00.0s (No Weapon)" end
-			end
-		end
-	end
-
-	-- Bag Full Actions: Unragdoll, Unfreeze & Teleport to X:610, Y:562, Z:60
+	-- Bag Full Triggered at 50 Coins: Teleport to Safe Zone & Shoot/Kill All
 	if isBagFull then
-		if statusLabel then statusLabel.Text = "Status: Full! Teleporting & Firing..." end
+		if statusLabel then statusLabel.Text = "Status: 50 Coins Full! Teleporting..." end
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
@@ -1012,7 +1005,7 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if closestPart and closestCF then
-		if statusLabel then statusLabel.Text = "Status: Farming Coins..." end
+		if statusLabel then statusLabel.Text = string.format("Status: Farming (%d/50)...", coinsThisSpawn) end
 		local exactCoinPos = updateTargetAnchor(closestCF)
 		local speed = (speedInput and tonumber(speedInput.Text)) or settingsData.Speed
 		local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
