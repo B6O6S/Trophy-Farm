@@ -1,0 +1,172 @@
+-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui", 10) or player:FindFirstChildWhichIsA("PlayerGui")
+
+if not playerGui then
+	playerGui = player:WaitForChild("PlayerGui")
+end
+
+-- Clean up any existing GUI from previous executions
+if playerGui:FindFirstChild("CoinFarmerGui") then
+	playerGui.CoinFarmerGui:Destroy()
+end
+
+-- State Variables
+local isFarmingActive = false
+local wasOnPlatform = false
+local currentTargetAnchor = nil
+local lastTargetPart = nil
+local CONFIG_FILE = "CoinFarmerSettings.json"
+
+-- Default Settings
+local settingsData = {
+	Speed = 60,
+	HeightOffset = 0,
+	AuraRadius = 8
+}
+
+-- Load Saved Settings if available
+pcall(function()
+	if readfile and isfile and isfile(CONFIG_FILE) then
+		local decoded = HttpService:JSONDecode(readfile(CONFIG_FILE))
+		if decoded then
+			settingsData.Speed = tonumber(decoded.Speed) or 60
+			settingsData.HeightOffset = tonumber(decoded.HeightOffset) or 0
+			settingsData.AuraRadius = tonumber(decoded.AuraRadius) or 8
+		end
+	end
+end)
+
+local function saveSettings()
+	pcall(function()
+		if writefile then
+			writefile(CONFIG_FILE, HttpService:JSONEncode(settingsData))
+		end
+	end)
+end
+
+-- Function to add a Fill-Only Highlight matched to the Coin's color
+local function addHighlight(target)
+	if target and (target:IsA("BasePart") or target:IsA("Model")) then
+		if not target:FindFirstChild("CoinHighlight") then
+			local highlight = Instance.new("Highlight")
+			highlight.Name = "CoinHighlight"
+			
+			-- Fill-only settings (disables outline)
+			highlight.OutlineTransparency = 1
+			highlight.FillTransparency = 0.35
+			
+			-- Match color to the coin
+			local function updateColor()
+				if target:IsA("BasePart") then
+					highlight.FillColor = target.Color
+				elseif target:IsA("Model") then
+					local primary = target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")
+					if primary then
+						highlight.FillColor = primary.Color
+					else
+						highlight.FillColor = Color3.fromRGB(255, 215, 0) -- Fallback gold
+					end
+				end
+			end
+			
+			updateColor()
+			
+			if target:IsA("BasePart") then
+				target:GetPropertyChangedSignal("Color"):Connect(function()
+					highlight.FillColor = target.Color
+				end)
+			end
+			
+			highlight.Parent = target
+		end
+	end
+end
+
+-- Check if an object is a target coin (Coin_Server or CoinVisual)
+local function isTargetCoin(desc)
+	return desc.Name == "Coin_Server" or desc.Name == "CoinVisual"
+end
+
+-- Check if a coin is fading/transparent (collected)
+local function isCoinFading(part)
+	if not part or not part.Parent then return true end
+	if part:IsA("BasePart") then
+		return part.Transparency > 0.1
+	elseif part:IsA("Model") then
+		local primary = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)
+		return primary and primary.Transparency > 0.1
+	end
+	return false
+end
+
+-- Scan and highlight ONLY target coins in any map's CoinContainer
+local function highlightCoins()
+	for _, map in ipairs(Workspace:GetChildren()) do
+		local container = map:FindFirstChild("CoinContainer")
+		if container then
+			for _, desc in ipairs(container:GetDescendants()) do
+				if isTargetCoin(desc) then
+					addHighlight(desc)
+				end
+			end
+		end
+	end
+end
+
+highlightCoins()
+
+-- Watch for newly added target coins across any map
+Workspace.DescendantAdded:Connect(function(descendant)
+	if isTargetCoin(descendant) then
+		task.wait(0.1)
+		addHighlight(descendant)
+	end
+end)
+
+-- UI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CoinFarmerGui"
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 99999
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 220, 0, 245)
+mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.BackgroundTransparency = 1
+title.Text = "Coin Farmer + TP / Sky"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 15
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(1, -20, 0, 30)
+toggleButton.Position = UDim2.new(0, 10, 0, 40)
+toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Text = "Toggle: OFF"
+toggleButton.TextSize = 14
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = mainFrame
+Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 4)
+
+-- Input Box Helper with Auto-Save
+local function createInputRow(labelText, defaultVal, posY, settingKey)
+	local
