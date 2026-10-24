@@ -898,7 +898,7 @@ RunService.Heartbeat:Connect(function(dt)
 					if statusLabel then statusLabel.Text = "Status: Checking Inventory..." end
 					if timerLabel then timerLabel.Text = string.format("%.1fs remaining", remainingSeconds) end
 
-					if weaponWaitTimer >= 11 then
+					if weaponWaitTimer >= 15 then
 						isBagFull = true
 						timerPlayedThisLife = true
 						if timerLabel then timerLabel.Text = "11.0s Complete (Bag Full)" end
