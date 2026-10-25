@@ -10,7 +10,6 @@ local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
 local Stats = game:GetService("Stats")
 local Camera = Workspace.CurrentCamera
-local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -63,6 +62,12 @@ local hasTeleportedToSafeZone = false
 local coinsThisSpawn = 0
 local BAG_MAX_COINS = 50
 
+-- Weapon Timer Mechanics Variables
+local weaponTimer = 0
+local TIMER_THRESHOLD = 11
+local foundCoinsMidTimer = false
+local hasTriggeredWeaponTimer = false
+
 -- Coins Per Hour & Performance Tracker Variables
 local farmStartTime = tick()
 local coinsCollectedSession = 0
@@ -75,16 +80,14 @@ local currentTargetAnchor = nil
 local visitedCoins = {}
 local votedChar = nil
 
--- Auto Fire Config
-local delayBetweenClicks = 0.05
-local lastActionTime = 0
-local clickState = false
-
 -- Reset State On Respawn
 local function onCharacterAdded(char)
 	isBagFull = false
 	hasTeleportedToSafeZone = false
 	coinsThisSpawn = 0
+	weaponTimer = 0
+	foundCoinsMidTimer = false
+	hasTriggeredWeaponTimer = false
 	visitedCoins = {}
 	trackedPickupCoins = {}
 end
@@ -228,18 +231,48 @@ local function isCoinFading(part)
 	return false
 end
 
--- Tool & Weapon Identification
+-- Tool & Weapon Identification & Force Equip Logic
 local function getGun()
 	local char = LocalPlayer.Character
-	if char and char:FindFirstChild("Gun") then return char.Gun end
+	if char then
+		local g = char:FindFirstChild("Gun") or char:FindFirstChild("Revolver")
+		if g then return g end
+	end
 	local bp = LocalPlayer:FindFirstChild("Backpack")
-	if bp and bp:FindFirstChild("Gun") then return bp.Gun end
-	if char and char:FindFirstChild("Revolver") then return char.Revolver end
-	if bp and bp:FindFirstChild("Revolver") then return bp.Revolver end
+	if bp then
+		local g = bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver")
+		if g then return g end
+	end
+	return nil
 end
 
 local function hasGun()
 	return getGun() ~= nil
+end
+
+local function equipGun()
+	local gun = getGun()
+	if not gun then return false end
+	
+	local char = LocalPlayer.Character
+	if not char then return false end
+	
+	if gun.Parent == char then return true end
+	
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:UnequipTools()
+		task.wait(0.05)
+		humanoid:EquipTool(gun)
+		
+		pcall(function()
+			gun.Parent = char
+		end)
+		
+		task.wait(0.1)
+		return gun.Parent == char
+	end
+	return false
 end
 
 local function getKnife()
@@ -258,6 +291,10 @@ end
 
 local function hasKnife()
 	return getKnife() ~= nil
+end
+
+local function hasWeapon()
+	return hasKnife() or hasGun()
 end
 
 --------------------------------------------------------
@@ -524,6 +561,9 @@ task.spawn(function()
 			farmStartTime = tick()
 			coinsCollectedSession = 0
 			coinsThisSpawn = 0
+			weaponTimer = 0
+			foundCoinsMidTimer = false
+			hasTriggeredWeaponTimer = false
 			trackedPickupCoins = {}
 			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
 		else
@@ -532,6 +572,9 @@ task.spawn(function()
 			isBagFull = false
 			hasTeleportedToSafeZone = false
 			coinsThisSpawn = 0
+			weaponTimer = 0
+			foundCoinsMidTimer = false
+			hasTriggeredWeaponTimer = false
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 			if rootPart and rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
 			if character then
@@ -584,25 +627,9 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------
--- REQUESTED AUTO FIRE ENGINE & RENDERSTEPPED LOOP
+-- REALTIME FPS & PING RENDERSTEPPED LOOP
 --------------------------------------------------------
-local function performAutoFire(mousePos)
-	pcall(function()
-		VirtualUser:Button1Down(mousePos)
-		VirtualUser:Button1Up(mousePos)
-	end)
-	
-	local character = LocalPlayer.Character
-	if character then
-		local tool = character:FindFirstChildOfClass("Tool")
-		if tool then
-			tool:Activate()
-		end
-	end
-end
-
 RunService.RenderStepped:Connect(function(dt)
-	-- Realtime FPS & Ping Calculation with Color Thresholds
 	frameCount = frameCount + 1
 	if tick() - lastFpsUpdate >= 1 then
 		currentFps = math.floor(frameCount / (tick() - lastFpsUpdate))
@@ -634,27 +661,6 @@ RunService.RenderStepped:Connect(function(dt)
 				headerPingLabel.TextColor3 = Color3.fromRGB(255, 140, 0)  -- Orange
 			else
 				headerPingLabel.TextColor3 = Color3.fromRGB(255, 50, 50)   -- Red
-			end
-		end
-	end
-
-	if not isShootMurdererActive then return end
-	
-	local character = LocalPlayer.Character
-	local tool = character and character:FindFirstChildOfClass("Tool")
-	
-	if tool then
-		local screenPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-		local currentTime = tick()
-		
-		if clickState then
-			performAutoFire(screenPos)
-			clickState = false
-			lastActionTime = currentTime
-		else
-			if currentTime - lastActionTime >= delayBetweenClicks then
-				clickState = true
-				lastActionTime = currentTime
 			end
 		end
 	end
@@ -701,26 +707,6 @@ local function updateTargetAnchor(cframe)
 	return currentTargetAnchor.Position
 end
 
-local function equipGun()
-	local gun = getGun()
-	if not gun then return false end
-	if gun.Parent == LocalPlayer.Character then return true end
-	if gun.Parent == LocalPlayer:FindFirstChild("Backpack") then
-		local char = LocalPlayer.Character
-		if char then
-			local humanoid = char:FindFirstChildOfClass("Humanoid")
-			if humanoid then
-				humanoid:EquipTool(gun)
-				for _ = 1, 10 do
-					task.wait(0.1)
-					if gun.Parent == char then return true end
-				end
-			end
-		end
-	end
-	return false
-end
-
 local function getMurd()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
@@ -735,13 +721,21 @@ local function getMurd()
 end
 
 local function shootMurd()
+	local gun = getGun()
+	if not gun then return end
+	
 	if not equipGun() then return end
-	task.wait(0.1)
+	
 	local murd = getMurd()
 	if murd and murd.Character and murd.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
 		local hrp = LocalPlayer.Character.HumanoidRootPart
 		local mHrp = murd.Character.HumanoidRootPart
 		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, hrp.Position.Y, mHrp.Position.Z))
+		
+		task.wait(0.05)
+		pcall(function()
+			gun:Activate()
+		end)
 	end
 end
 
@@ -884,7 +878,7 @@ RunService.Heartbeat:Connect(function(dt)
 					coinsCollectedSession = coinsCollectedSession + 1
 					coinsThisSpawn = coinsThisSpawn + 1
 					
-					-- Trigger Bag Full upon hitting 50 coins
+					-- Trigger Bag Full ONLY upon reaching 50 coins
 					if coinsThisSpawn >= BAG_MAX_COINS then
 						isBagFull = true
 					end
@@ -936,9 +930,24 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 	if unvisitedCount == 0 then visitedCoins = {} end
 
-	-- Bag Full Triggered at 50 Coins: Teleport to Safe Zone & Shoot/Kill All
+	-- Weapon Acquisition Timer Progression
+	if hasWeapon() and not isBagFull and not hasTriggeredWeaponTimer then
+		if #allDescendants > 0 then
+			-- Coins are currently present on the map: pause timer
+			foundCoinsMidTimer = true
+		else
+			-- No active coins present: increment timer
+			weaponTimer = weaponTimer + dt
+			if weaponTimer >= TIMER_THRESHOLD then
+				isBagFull = true
+				hasTriggeredWeaponTimer = true
+			end
+		end
+	end
+
+	-- Bag Full Triggered: Teleport & Execute Combat
 	if isBagFull then
-		if statusLabel then statusLabel.Text = "Status: 50 Coins Full! Teleporting..." end
+		if statusLabel then statusLabel.Text = "Status: Full / Weapon Done! Teleporting..." end
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
@@ -967,14 +976,7 @@ RunService.Heartbeat:Connect(function(dt)
 		if hasKnife() and isAutoKillAllActive then
 			pcall(killAll)
 		elseif hasGun() and isShootMurdererActive then
-			pcall(function()
-				local murd = getMurd()
-				if murd and murd.Character and murd.Character:FindFirstChildOfClass("Humanoid") then
-					if murd.Character.Humanoid.Health > 0 then
-						shootMurd()
-					end
-				end
-			end)
+			pcall(shootMurd)
 		end
 
 		return
@@ -1005,7 +1007,14 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if closestPart and closestCF then
-		if statusLabel then statusLabel.Text = string.format("Status: Farming (%d/50)...", coinsThisSpawn) end
+		if statusLabel then 
+			if hasWeapon() and not hasTriggeredWeaponTimer then
+				statusLabel.Text = string.format("Status: Farming W/ Weapon (%d/50)...", coinsThisSpawn)
+			else
+				statusLabel.Text = string.format("Status: Farming (%d/50)...", coinsThisSpawn)
+			end
+		end
+
 		local exactCoinPos = updateTargetAnchor(closestCF)
 		local speed = (speedInput and tonumber(speedInput.Text)) or settingsData.Speed
 		local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
@@ -1030,7 +1039,19 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 		end
 	else
+		-- No active coins found on map
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		bv.Velocity = Vector3.zero
+
+		-- If coins disappeared mid-timer while holding a weapon, instantly count bag as full (once per spawn)
+		if hasWeapon() and foundCoinsMidTimer and not hasTriggeredWeaponTimer then
+			isBagFull = true
+			hasTriggeredWeaponTimer = true
+		elseif hasWeapon() and not hasTriggeredWeaponTimer then
+			local remaining = math.max(0, math.ceil(TIMER_THRESHOLD - weaponTimer))
+			if statusLabel then statusLabel.Text = string.format("Status: Waiting Coins (%ds)...", remaining) end
+		else
+			if statusLabel then statusLabel.Text = string.format("Status: Waiting for Coins... (%d/50)", coinsThisSpawn) end
+		end
 	end
 end)
