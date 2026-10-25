@@ -64,7 +64,7 @@ local BAG_MAX_COINS = 50
 
 -- Weapon Timer Mechanics Variables (Works for both Knife & Gun)
 local weaponTimer = 0
-local TIMER_THRESHOLD = 20
+local TIMER_THRESHOLD = 25
 local foundCoinsMidTimer = false
 local hasTriggeredWeaponTimer = false
 
@@ -949,13 +949,13 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 	if unvisitedCount == 0 then visitedCoins = {} end
 
-	-- Weapon Acquisition Timer Progression (Knife or Gun - 20s Threshold)
+	-- Weapon Acquisition Timer Progression (Knife or Gun - 25s Threshold)
 	if hasWeapon() and not isBagFull and not hasTriggeredWeaponTimer then
 		if #allDescendants > 0 then
 			-- Coins are currently present on the map: pause timer
 			foundCoinsMidTimer = true
 		else
-			-- No active coins present: increment 20-second timer
+			-- No active coins present: increment 25-second timer
 			weaponTimer = weaponTimer + dt
 			if weaponTimer >= TIMER_THRESHOLD then
 				isBagFull = true
