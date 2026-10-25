@@ -26,7 +26,8 @@ local settingsData = {
 	ShootMurderer = false,
 	AutoKillAll = false,
 	FpsBooster = false,
-	AutoRejoin = true
+	AutoRejoin = true,
+	ShowCoins = false
 }
 
 -- Load Saved Settings
@@ -56,6 +57,7 @@ local isShootMurdererActive = settingsData.ShootMurderer
 local isAutoKillAllActive = settingsData.AutoKillAll
 local isFpsBoosterActive = settingsData.FpsBooster
 local isAutoRejoinActive = settingsData.AutoRejoin
+local isShowCoinsActive = settingsData.ShowCoins
 
 local isBagFull = false
 local hasTeleportedToSafeZone = false
@@ -73,6 +75,12 @@ local safeZoneTimer = 0
 local HOLD_SAFEZONE_TIME = 3
 local isResetting = false
 
+-- Waiting Position Flag & Voting State Flag
+local hasDroppedDown = false
+local isCurrentlyVoting = false
+local isScriptTeleporting = false
+local lastPosition = Vector3.new(0, 0, 0)
+
 -- Coins Per Hour & Performance Tracker Variables
 local farmStartTime = tick()
 local coinsCollectedSession = 0
@@ -84,6 +92,7 @@ local trackedPickupCoins = {}
 local currentTargetAnchor = nil
 local visitedCoins = {}
 local votedChar = nil
+local coinHighlights = {}
 
 -- Reset State On Respawn
 local function onCharacterAdded(char)
@@ -93,10 +102,18 @@ local function onCharacterAdded(char)
 	weaponTimer = 0
 	safeZoneTimer = 0
 	isResetting = false
+	hasDroppedDown = false
+	isCurrentlyVoting = false
+	isScriptTeleporting = false
 	foundCoinsMidTimer = false
 	hasTriggeredWeaponTimer = false
 	visitedCoins = {}
 	trackedPickupCoins = {}
+	local hrp = char:WaitForChild("HumanoidRootPart", 5)
+	if hrp then
+		hrp.Anchored = false
+		lastPosition = hrp.Position
+	end
 end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
@@ -134,7 +151,19 @@ end
 
 setupAutoRejoin()
 
--- ==================== FPS BOOSTER ENGINE ====================
+-- ==================== FPS BOOSTER ENGINE (AGGRESSIVE & REAL-TIME) ====================
+local lightingConnection = nil
+local workspaceConnection = nil
+
+local function isUnwantedEffect(obj)
+	return obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") or 
+	       obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or 
+	       obj:IsA("Fire") or obj:IsA("Sparkles") or obj:IsA("PostEffect") or 
+	       obj:IsA("Atmosphere") or obj:IsA("Clouds") or obj:IsA("Sky") or
+	       obj:IsA("BloomEffect") or obj:IsA("BlurEffect") or obj:IsA("ColorCorrectionEffect") or
+	       obj:IsA("DepthOfFieldEffect") or obj:IsA("SunRaysEffect")
+end
+
 local function applyFpsBoost(enable)
 	pcall(function()
 		if enable then
@@ -143,15 +172,11 @@ local function applyFpsBoost(enable)
 			Lighting.Technology = Enum.Technology.Compatibility
 			
 			for _, obj in ipairs(Lighting:GetChildren()) do
-				if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Clouds") or obj:IsA("Sky") then
-					obj.Enabled = false
-				end
+				obj:Destroy()
 			end
 
 			for _, v in ipairs(Workspace:GetDescendants()) do
-				if v:IsA("PointLight") or v:IsA("SpotLight") or v:IsA("SurfaceLight") then
-					v:Destroy()
-				elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") or v:IsA("Sparkles") then
+				if isUnwantedEffect(v) then
 					v:Destroy()
 				end
 			end
@@ -173,6 +198,35 @@ local function applyFpsBoost(enable)
 				terrain.WaterReflectance = 0
 				terrain.WaterTransparency = 0
 			end
+
+			if not lightingConnection then
+				lightingConnection = Lighting.ChildAdded:Connect(function(child)
+					if isFpsBoosterActive then
+						task.defer(function()
+							if child and child.Parent then child:Destroy() end
+						end)
+					end
+				end)
+			end
+
+			if not workspaceConnection then
+				workspaceConnection = Workspace.DescendantAdded:Connect(function(descendant)
+					if isFpsBoosterActive and isUnwantedEffect(descendant) then
+						task.defer(function()
+							if descendant and descendant.Parent then descendant:Destroy() end
+						end)
+					end
+				end)
+			end
+		else
+			if lightingConnection then
+				lightingConnection:Disconnect()
+				lightingConnection = nil
+			end
+			if workspaceConnection then
+				workspaceConnection:Disconnect()
+				workspaceConnection = nil
+			end
 		end
 	end)
 end
@@ -180,7 +234,7 @@ end
 Players.PlayerAdded:Connect(function(plr)
 	plr.CharacterAdded:Connect(function(char)
 		if isFpsBoosterActive then
-			task.wait(1)
+			task.wait(0.5)
 			pcall(function()
 				for _, acc in ipairs(char:GetChildren()) do
 					if acc:IsA("Accessory") or acc:IsA("Hat") then
@@ -190,6 +244,16 @@ Players.PlayerAdded:Connect(function(plr)
 			end)
 		end
 	end)
+end)
+
+RunService.Heartbeat:Connect(function()
+	if isFpsBoosterActive then
+		pcall(function()
+			for _, obj in ipairs(Lighting:GetChildren()) do
+				obj:Destroy()
+			end
+		end)
+	end
 end)
 
 -- ==================== COIN AURA METHODS ====================
@@ -344,7 +408,7 @@ task.spawn(function()
 	screenGui.Parent = playerGui
 
 	local mainFrame = Instance.new("Frame")
-	mainFrame.Size = UDim2.new(0, 240, 0, 330)
+	mainFrame.Size = UDim2.new(0, 240, 0, 360)
 	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 	mainFrame.BorderSizePixel = 0
@@ -421,7 +485,7 @@ task.spawn(function()
 	contentContainer.Position = UDim2.new(0, 5, 0, 34)
 	contentContainer.BackgroundTransparency = 1
 	contentContainer.BorderSizePixel = 0
-	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 380)
+	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 410)
 	contentContainer.ScrollBarThickness = 2
 	contentContainer.Parent = mainFrame
 
@@ -432,7 +496,7 @@ task.spawn(function()
 			mainFrame:TweenSize(UDim2.new(0, 240, 0, 32), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
 			minimizeBtn.Text = "+"
 		else
-			mainFrame:TweenSize(UDim2.new(0, 240, 0, 330), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
+			mainFrame:TweenSize(UDim2.new(0, 240, 0, 360), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
 				contentContainer.Visible = true
 			end)
 			minimizeBtn.Text = "–"
@@ -475,7 +539,8 @@ task.spawn(function()
 	local shootBtn = createButton("Shoot Murderer", 56, isShootMurdererActive)
 	local killBtn = createButton("Auto Kill All", 84, isAutoKillAllActive)
 	local fpsBtn = createButton("FPS Booster", 112, isFpsBoosterActive)
-	local rejoinBtn = createButton("Auto Rejoin", 140, isAutoRejoinActive)
+	local showCoinsBtn = createButton("Show Coins", 140, isShowCoinsActive)
+	local rejoinBtn = createButton("Auto Rejoin", 168, isAutoRejoinActive)
 
 	local function createInput(labelText, defaultVal, posY, settingKey)
 		local label = Instance.new("TextLabel")
@@ -524,14 +589,14 @@ task.spawn(function()
 		return box
 	end
 
-	speedInput = createInput("Speed", settingsData.Speed, 170, "Speed")
-	heightInput = createInput("Height Offset", settingsData.HeightOffset, 198, "HeightOffset")
-	radiusInput = createInput("Aura Radius", settingsData.AuraRadius, 226, "AuraRadius")
+	speedInput = createInput("Speed", settingsData.Speed, 198, "Speed")
+	heightInput = createInput("Height Offset", settingsData.HeightOffset, 226, "HeightOffset")
+	radiusInput = createInput("Aura Radius", settingsData.AuraRadius, 254, "AuraRadius")
 
 	-- Status Box
 	local statusBox = Instance.new("Frame")
 	statusBox.Size = UDim2.new(1, 0, 0, 26)
-	statusBox.Position = UDim2.new(0, 0, 0, 256)
+	statusBox.Position = UDim2.new(0, 0, 0, 284)
 	statusBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
 	statusBox.BorderSizePixel = 0
 	statusBox.Parent = contentContainer
@@ -552,7 +617,7 @@ task.spawn(function()
 	-- Coins Per Hour Box
 	local cphBox = Instance.new("Frame")
 	cphBox.Size = UDim2.new(1, 0, 0, 26)
-	cphBox.Position = UDim2.new(0, 0, 0, 286)
+	cphBox.Position = UDim2.new(0, 0, 0, 314)
 	cphBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
 	cphBox.BorderSizePixel = 0
 	cphBox.Parent = contentContainer
@@ -589,9 +654,13 @@ task.spawn(function()
 			weaponTimer = 0
 			safeZoneTimer = 0
 			isResetting = false
+			hasDroppedDown = false
+			isCurrentlyVoting = false
+			isScriptTeleporting = false
 			foundCoinsMidTimer = false
 			hasTriggeredWeaponTimer = false
 			trackedPickupCoins = {}
+			if hrp then lastPosition = hrp.Position end
 			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
 		else
 			statusLabel.Text = "Status: Idle / Ready"
@@ -602,10 +671,16 @@ task.spawn(function()
 			weaponTimer = 0
 			safeZoneTimer = 0
 			isResetting = false
+			hasDroppedDown = false
+			isCurrentlyVoting = false
+			isScriptTeleporting = false
 			foundCoinsMidTimer = false
 			hasTriggeredWeaponTimer = false
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
-			if rootPart and rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
+			if rootPart then
+				rootPart.Anchored = false
+				if rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
+			end
 			if character then
 				for _, part in ipairs(character:GetDescendants()) do
 					if part:IsA("BasePart") then part.CanCollide = true end
@@ -645,6 +720,19 @@ task.spawn(function()
 		saveSettings()
 		updateToggleVisual(fpsBtn, isFpsBoosterActive, "FPS Booster")
 		applyFpsBoost(isFpsBoosterActive)
+	end)
+
+	showCoinsBtn.MouseButton1Click:Connect(function()
+		isShowCoinsActive = not isShowCoinsActive
+		settingsData.ShowCoins = isShowCoinsActive
+		saveSettings()
+		updateToggleVisual(showCoinsBtn, isShowCoinsActive, "Show Coins")
+		if not isShowCoinsActive then
+			for _, hl in pairs(coinHighlights) do
+				if hl then hl:Destroy() end
+			end
+			coinHighlights = {}
+		end
 	end)
 
 	rejoinBtn.MouseButton1Click:Connect(function()
@@ -757,14 +845,17 @@ local function shootMurd()
 	
 	local murd = getMurd()
 	if murd and murd.Character and murd.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+		isScriptTeleporting = true
 		local hrp = LocalPlayer.Character.HumanoidRootPart
 		local mHrp = murd.Character.HumanoidRootPart
 		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, hrp.Position.Y, mHrp.Position.Z))
+		lastPosition = hrp.Position
 		
 		task.wait(0.05)
 		pcall(function()
 			gun:Activate()
 		end)
+		task.delay(0.2, function() isScriptTeleporting = false end)
 	end
 end
 
@@ -857,8 +948,12 @@ task.spawn(function()
 						local hum = char and char:FindFirstChildOfClass("Humanoid")
 						local hrp = hum and hum.RootPart
 						if hrp and hum.Health > 0 and char ~= votedChar then
+							isCurrentlyVoting = true
+							isScriptTeleporting = true
+							hrp.Anchored = false
 							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
 							hrp.CFrame = CFrame.new(safePos)
+							lastPosition = hrp.Position
 							if firetouchinterest then
 								pcall(firetouchinterest, hrp, target.trigger, 0)
 								pcall(firetouchinterest, hrp, target.trigger, 1)
@@ -869,12 +964,16 @@ task.spawn(function()
 								hum:ChangeState(Enum.HumanoidStateType.Dead)
 								hum.Health = 0
 							end
+							task.delay(0.2, function() isScriptTeleporting = false end)
 						end
 					end
 				else
 					votedChar = nil
+					isCurrentlyVoting = false
 				end
 			end)
+		else
+			isCurrentlyVoting = false
 		end
 	end
 end)
@@ -894,11 +993,65 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
+	-- Scan Active Map Coins
+	local containers = getCoinContainers()
+	local allDescendants = {}
+	for _, container in ipairs(containers) do
+		for _, desc in ipairs(container:GetDescendants()) do
+			if isTargetCoin(desc) then table.insert(allDescendants, desc) end
+		end
+	end
+
+	-- Show Coins Highlight Logic (No Outlines, Fill matches coin color)
+	if isShowCoinsActive then
+		local activeCoinMap = {}
+		for _, part in ipairs(allDescendants) do
+			if not isCoinFading(part) then
+				activeCoinMap[part] = true
+				if not coinHighlights[part] then
+					local hl = Instance.new("Highlight")
+					hl.Name = "CoinEspHighlight"
+					hl.Adornee = part
+					hl.FillTransparency = 0.3
+					hl.OutlineTransparency = 1 -- NO OUTLINES
+					
+					local coinColor = Color3.fromRGB(255, 215, 0)
+					if part:IsA("BasePart") then
+						coinColor = part.Color
+					elseif part:IsA("Model") then
+						local bp = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)
+						if bp then coinColor = bp.Color end
+					end
+					hl.FillColor = coinColor
+					hl.Parent = part
+					coinHighlights[part] = hl
+				else
+					local bp = part:IsA("BasePart") and part or (part:IsA("Model") and (part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)))
+					if bp and coinHighlights[part] then
+						coinHighlights[part].FillColor = bp.Color
+					end
+				end
+			end
+		end
+		for part, hl in pairs(coinHighlights) do
+			if not activeCoinMap[part] or not part.Parent or isCoinFading(part) then
+				if hl then hl:Destroy() end
+				coinHighlights[part] = nil
+			end
+		end
+	else
+		if next(coinHighlights) then
+			for _, hl in pairs(coinHighlights) do
+				if hl then hl:Destroy() end
+			end
+			coinHighlights = {}
+		end
+	end
+
 	-- Coin Verification & Verified Pickup Detection
 	if character and rootPart and isFarmingActive and not isBagFull then
 		local radius = (radiusInput and tonumber(radiusInput.Text)) or settingsData.AuraRadius
 		local rootPos = rootPart.Position
-		local containers = getCoinContainers()
 		local coinParts = getCoinParts(containers)
 		
 		for coinObj, info in pairs(trackedPickupCoins) do
@@ -908,7 +1061,6 @@ RunService.Heartbeat:Connect(function(dt)
 					coinsCollectedSession = coinsCollectedSession + 1
 					coinsThisSpawn = coinsThisSpawn + 1
 					
-					-- Trigger Bag Full ONLY upon reaching 50 coins
 					if coinsThisSpawn >= BAG_MAX_COINS then
 						isBagFull = true
 					end
@@ -945,15 +1097,6 @@ RunService.Heartbeat:Connect(function(dt)
 		bv.Parent = rootPart
 	end
 
-	-- Scan Active Map Coins
-	local containers = getCoinContainers()
-	local allDescendants = {}
-	for _, container in ipairs(containers) do
-		for _, desc in ipairs(container:GetDescendants()) do
-			if isTargetCoin(desc) then table.insert(allDescendants, desc) end
-		end
-	end
-
 	local unvisitedCount = 0
 	for _, part in ipairs(allDescendants) do
 		if not isCoinFading(part) and not visitedCoins[part] then unvisitedCount = unvisitedCount + 1 end
@@ -963,10 +1106,8 @@ RunService.Heartbeat:Connect(function(dt)
 	-- Weapon Acquisition Timer Progression (Knife or Gun - 25s Threshold)
 	if hasWeapon() and not isBagFull and not hasTriggeredWeaponTimer then
 		if #allDescendants > 0 then
-			-- Coins are currently present on the map: pause timer
 			foundCoinsMidTimer = true
 		else
-			-- No active coins present: increment 25-second timer
 			weaponTimer = weaponTimer + dt
 			if weaponTimer >= TIMER_THRESHOLD then
 				isBagFull = true
@@ -980,6 +1121,8 @@ RunService.Heartbeat:Connect(function(dt)
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
+		isScriptTeleporting = true
+		rootPart.Anchored = false
 		if rootPart:FindFirstChild("SmoothFarmVelocity") then
 			rootPart.SmoothFarmVelocity:Destroy()
 		end
@@ -1001,8 +1144,9 @@ RunService.Heartbeat:Connect(function(dt)
 			rootPart.CFrame = CFrame.new(610, 562, 60)
 			hasTeleportedToSafeZone = true
 		end
+		lastPosition = rootPart.Position
+		task.delay(0.2, function() isScriptTeleporting = false end)
 
-		-- Progress 3-second hold timer
 		safeZoneTimer = safeZoneTimer + dt
 		local remainingSafeTime = math.max(0, math.ceil(HOLD_SAFEZONE_TIME - safeZoneTimer))
 		if statusLabel then 
@@ -1015,7 +1159,6 @@ RunService.Heartbeat:Connect(function(dt)
 			pcall(shootMurd)
 		end
 
-		-- Once 3 seconds pass in safe zone holding the gun/weapon -> Reset Character
 		if safeZoneTimer >= HOLD_SAFEZONE_TIME and not isResetting then
 			isResetting = true
 			if humanoid and humanoid.Health > 0 then
@@ -1051,6 +1194,10 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if closestPart and closestCF then
+		hasDroppedDown = false
+		rootPart.Anchored = false
+		isScriptTeleporting = false
+
 		if statusLabel then 
 			if hasWeapon() and not hasTriggeredWeaponTimer then
 				statusLabel.Text = string.format("Status: Farming W/ Weapon (%d/50)...", coinsThisSpawn)
@@ -1071,31 +1218,53 @@ RunService.Heartbeat:Connect(function(dt)
 		local distance = (targetPosition - currentPosition).Magnitude
 
 		if distance >= 500 then
+			isScriptTeleporting = true
 			rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
+			lastPosition = rootPart.Position
 			bv.Velocity = Vector3.zero
+			task.delay(0.2, function() isScriptTeleporting = false end)
 		else
 			local direction = targetPosition - currentPosition
 			bv.Velocity = direction.Unit * speed
 			rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
+			lastPosition = rootPart.Position
 
 			if distance <= 2.5 then
 				visitedCoins[closestPart] = true
 			end
 		end
 	else
-		-- No active coins found on map
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		bv.Velocity = Vector3.zero
 
-		-- If coins disappeared mid-timer while holding Knife/Gun, instantly count bag as full (once per spawn)
-		if hasWeapon() and foundCoinsMidTimer and not hasTriggeredWeaponTimer then
-			isBagFull = true
-			hasTriggeredWeaponTimer = true
-		elseif hasWeapon() and not hasTriggeredWeaponTimer then
-			local remaining = math.max(0, math.ceil(TIMER_THRESHOLD - weaponTimer))
-			if statusLabel then statusLabel.Text = string.format("Status: Waiting Coins (%ds)...", remaining) end
+		if isCurrentlyVoting then
+			rootPart.Anchored = false
+			hasDroppedDown = false
+			lastPosition = rootPart.Position
+			if statusLabel then statusLabel.Text = "Status: Auto Voting..." end
 		else
-			if statusLabel then statusLabel.Text = string.format("Status: Waiting for Coins... (%d/50)", coinsThisSpawn) end
+			-- Check if character was externally teleported (distance jump without script moving them)
+			local posDist = (rootPart.Position - lastPosition).Magnitude
+			if posDist > 15 and not isScriptTeleporting and not hasDroppedDown then
+				hasDroppedDown = true
+				rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 8, 0)
+			end
+
+			if hasDroppedDown then
+				rootPart.Anchored = true
+			end
+
+			lastPosition = rootPart.Position
+
+			if hasWeapon() and foundCoinsMidTimer and not hasTriggeredWeaponTimer then
+				isBagFull = true
+				hasTriggeredWeaponTimer = true
+			elseif hasWeapon() and not hasTriggeredWeaponTimer then
+				local remaining = math.max(0, math.ceil(TIMER_THRESHOLD - weaponTimer))
+				if statusLabel then statusLabel.Text = string.format("Status: Waiting Coins (%ds)...", remaining) end
+			else
+				if statusLabel then statusLabel.Text = string.format("Status: Waiting for Coins... (%d/50)", coinsThisSpawn) end
+			end
 		end
 	end
 end)
