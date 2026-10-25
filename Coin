@@ -9,6 +9,7 @@ local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
 local Stats = game:GetService("Stats")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local Camera = Workspace.CurrentCamera
 
 local LocalPlayer = Players.LocalPlayer
@@ -64,7 +65,7 @@ local hasTeleportedToSafeZone = false
 local coinsThisSpawn = 0
 local BAG_MAX_COINS = 50
 
--- Weapon Timer Mechanics Variables (Works for both Knife & Gun) - Updated to 30s
+-- Weapon Timer Mechanics Variables (Works for both Knife & Gun) - 30s
 local weaponTimer = 0
 local TIMER_THRESHOLD = 30
 local foundCoinsMidTimer = false
@@ -837,6 +838,15 @@ local function getMurd()
 	return nil
 end
 
+-- Simulated Center Screen Click using VirtualInputManager
+local function autoClick()
+	pcall(function()
+		local pos = Camera.ViewportSize / 2
+		VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 0)
+		VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 0)
+	end)
+end
+
 local function shootMurd()
 	local gun = getGun()
 	if not gun then return end
@@ -852,9 +862,7 @@ local function shootMurd()
 		lastPosition = hrp.Position
 		
 		task.wait(0.05)
-		pcall(function()
-			gun:Activate()
-		end)
+		autoClick()
 		task.delay(0.2, function() isScriptTeleporting = false end)
 	end
 end
