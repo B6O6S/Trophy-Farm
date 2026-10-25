@@ -68,6 +68,11 @@ local TIMER_THRESHOLD = 25
 local foundCoinsMidTimer = false
 local hasTriggeredWeaponTimer = false
 
+-- 3-Second Hold & Reset State Variables
+local safeZoneTimer = 0
+local HOLD_SAFEZONE_TIME = 3
+local isResetting = false
+
 -- Coins Per Hour & Performance Tracker Variables
 local farmStartTime = tick()
 local coinsCollectedSession = 0
@@ -86,6 +91,8 @@ local function onCharacterAdded(char)
 	hasTeleportedToSafeZone = false
 	coinsThisSpawn = 0
 	weaponTimer = 0
+	safeZoneTimer = 0
+	isResetting = false
 	foundCoinsMidTimer = false
 	hasTriggeredWeaponTimer = false
 	visitedCoins = {}
@@ -580,6 +587,8 @@ task.spawn(function()
 			coinsCollectedSession = 0
 			coinsThisSpawn = 0
 			weaponTimer = 0
+			safeZoneTimer = 0
+			isResetting = false
 			foundCoinsMidTimer = false
 			hasTriggeredWeaponTimer = false
 			trackedPickupCoins = {}
@@ -591,6 +600,8 @@ task.spawn(function()
 			hasTeleportedToSafeZone = false
 			coinsThisSpawn = 0
 			weaponTimer = 0
+			safeZoneTimer = 0
+			isResetting = false
 			foundCoinsMidTimer = false
 			hasTriggeredWeaponTimer = false
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
@@ -964,9 +975,8 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- Bag Full Triggered: Teleport & Execute Combat
+	-- Bag Full Triggered: Teleport, Hold for 3s with Weapon, then Reset
 	if isBagFull then
-		if statusLabel then statusLabel.Text = "Status: Full / Weapon Done! Teleporting..." end
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
@@ -992,10 +1002,25 @@ RunService.Heartbeat:Connect(function(dt)
 			hasTeleportedToSafeZone = true
 		end
 
+		-- Progress 3-second hold timer
+		safeZoneTimer = safeZoneTimer + dt
+		local remainingSafeTime = math.max(0, math.ceil(HOLD_SAFEZONE_TIME - safeZoneTimer))
+		if statusLabel then 
+			statusLabel.Text = string.format("Status: Holding Gun (%ds) -> Reset", remainingSafeTime) 
+		end
+
 		if hasKnife() and isAutoKillAllActive then
 			pcall(killAll)
 		elseif hasGun() and isShootMurdererActive then
 			pcall(shootMurd)
+		end
+
+		-- Once 3 seconds pass in safe zone holding the gun/weapon -> Reset Character
+		if safeZoneTimer >= HOLD_SAFEZONE_TIME and not isResetting then
+			isResetting = true
+			if humanoid and humanoid.Health > 0 then
+				humanoid.Health = 0
+			end
 		end
 
 		return
