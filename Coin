@@ -62,9 +62,9 @@ local hasTeleportedToSafeZone = false
 local coinsThisSpawn = 0
 local BAG_MAX_COINS = 50
 
--- Weapon Timer Mechanics Variables
+-- Weapon Timer Mechanics Variables (Works for both Knife & Gun)
 local weaponTimer = 0
-local TIMER_THRESHOLD = 11
+local TIMER_THRESHOLD = 20
 local foundCoinsMidTimer = false
 local hasTriggeredWeaponTimer = false
 
@@ -291,6 +291,24 @@ end
 
 local function hasKnife()
 	return getKnife() ~= nil
+end
+
+local function equipKnife()
+	local knife = getKnife()
+	if not knife then return false end
+	local char = LocalPlayer.Character
+	if not char then return false end
+	if knife.Parent == char then return true end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:UnequipTools()
+		task.wait(0.05)
+		humanoid:EquipTool(knife)
+		pcall(function() knife.Parent = char end)
+		task.wait(0.1)
+		return knife.Parent == char
+	end
+	return false
 end
 
 local function hasWeapon()
@@ -740,6 +758,7 @@ local function shootMurd()
 end
 
 local function killAll()
+	equipKnife()
 	local knife = getKnife()
 	if not knife then return end
 	local events = knife:FindFirstChild("Events")
@@ -930,13 +949,13 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 	if unvisitedCount == 0 then visitedCoins = {} end
 
-	-- Weapon Acquisition Timer Progression
+	-- Weapon Acquisition Timer Progression (Knife or Gun - 20s Threshold)
 	if hasWeapon() and not isBagFull and not hasTriggeredWeaponTimer then
 		if #allDescendants > 0 then
 			-- Coins are currently present on the map: pause timer
 			foundCoinsMidTimer = true
 		else
-			-- No active coins present: increment timer
+			-- No active coins present: increment 20-second timer
 			weaponTimer = weaponTimer + dt
 			if weaponTimer >= TIMER_THRESHOLD then
 				isBagFull = true
@@ -1043,7 +1062,7 @@ RunService.Heartbeat:Connect(function(dt)
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		bv.Velocity = Vector3.zero
 
-		-- If coins disappeared mid-timer while holding a weapon, instantly count bag as full (once per spawn)
+		-- If coins disappeared mid-timer while holding Knife/Gun, instantly count bag as full (once per spawn)
 		if hasWeapon() and foundCoinsMidTimer and not hasTriggeredWeaponTimer then
 			isBagFull = true
 			hasTriggeredWeaponTimer = true
