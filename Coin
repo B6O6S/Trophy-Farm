@@ -64,9 +64,9 @@ local hasTeleportedToSafeZone = false
 local coinsThisSpawn = 0
 local BAG_MAX_COINS = 50
 
--- Weapon Timer Mechanics Variables (Works for both Knife & Gun)
+-- Weapon Timer Mechanics Variables (Works for both Knife & Gun) - Updated to 30s
 local weaponTimer = 0
-local TIMER_THRESHOLD = 25
+local TIMER_THRESHOLD = 30
 local foundCoinsMidTimer = false
 local hasTriggeredWeaponTimer = false
 
@@ -848,7 +848,7 @@ local function shootMurd()
 		isScriptTeleporting = true
 		local hrp = LocalPlayer.Character.HumanoidRootPart
 		local mHrp = murd.Character.HumanoidRootPart
-		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, hrp.Position.Y, mHrp.Position.Z))
+		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, mHrp.Position.Y, mHrp.Position.Z))
 		lastPosition = hrp.Position
 		
 		task.wait(0.05)
@@ -1103,7 +1103,7 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 	if unvisitedCount == 0 then visitedCoins = {} end
 
-	-- Weapon Acquisition Timer Progression (Knife or Gun - 25s Threshold)
+	-- Weapon Acquisition Timer Progression (Knife or Gun - 30s Threshold)
 	if hasWeapon() and not isBagFull and not hasTriggeredWeaponTimer then
 		if #allDescendants > 0 then
 			foundCoinsMidTimer = true
@@ -1243,7 +1243,6 @@ RunService.Heartbeat:Connect(function(dt)
 			lastPosition = rootPart.Position
 			if statusLabel then statusLabel.Text = "Status: Auto Voting..." end
 		else
-			-- Check if character was externally teleported (distance jump without script moving them)
 			local posDist = (rootPart.Position - lastPosition).Magnitude
 			if posDist > 15 and not isScriptTeleporting and not hasDroppedDown then
 				hasDroppedDown = true
