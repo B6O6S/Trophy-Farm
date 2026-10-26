@@ -349,7 +349,7 @@ local function hasValidTargets()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP TARGETS TO SCREEN)
+-- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP NON-WHITELISTED TARGETS TO SCREEN)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -391,7 +391,7 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Teleport non-whitelisted targets to your screen and activate knife
+				-- Teleport non-whitelisted targets to your screen and activate knife (whitelisted players are completely ignored)
 				for _, target in ipairs(Players:GetPlayers()) do
 					if target ~= LP and not isWhitelisted(target) then
 						local targetChar = target.Character
