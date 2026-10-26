@@ -102,7 +102,7 @@ local targetLastPositions = {}
 local targetStillTimers = {}
 local isResettingFromTargetStill = false
 
-local isMurdererActionExecuted = false
+local isMurdererLoopRunning = false
 
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
@@ -229,7 +229,7 @@ LP.CharacterAdded:Connect(function(char)
 	scriptLoadTime = tick()
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
-	isMurdererActionExecuted = false
+	isMurdererLoopRunning = false
 	gunHeldTimer = 0
 	targetLastPositions = {}
 	targetStillTimers = {}
@@ -336,8 +336,91 @@ local function anyoneHasWeapon()
 	return false
 end
 
+local function hasValidTargets()
+	for _, target in ipairs(Players:GetPlayers()) do
+		if target ~= LP and not isWhitelisted(target) then
+			local targetChar = target.Character
+			if targetChar then
+				local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+				if targetHum and targetHum.Health > 0 then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 --------------------------------------------------------------------------------
--- RANDOMIZED RESET / FLING LOGIC
+-- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP TARGETS TO SCREEN)
+--------------------------------------------------------------------------------
+local function runMurdererLogic()
+	if isMurdererLoopRunning then return end
+	isMurdererLoopRunning = true
+
+	task.spawn(function()
+		task.wait(5) -- Wait 5 seconds after role start
+		local baseCFrame = CFrame.new(620, 562, 35)
+
+		while isMurdererLoopRunning do
+			local char = LP.Character
+			local backpack = LP:FindFirstChild("Backpack")
+			
+			if not char then
+				task.wait(0.1)
+				continue
+			end
+
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			local root = char:FindFirstChild("HumanoidRootPart")
+
+			if not (humanoid and root and humanoid.Health > 0) then
+				break
+			end
+
+			-- Hold base position
+			pcall(function()
+				root.CFrame = baseCFrame
+			end)
+
+			-- Search for knife
+			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
+			
+			if knife and hasValidTargets() then
+				if backpack and knife.Parent == backpack then
+					pcall(function()
+						humanoid:EquipTool(knife)
+					end)
+					task.wait(0.05)
+				end
+
+				-- Teleport non-whitelisted targets to your screen and activate knife
+				for _, target in ipairs(Players:GetPlayers()) do
+					if target ~= LP and not isWhitelisted(target) then
+						local targetChar = target.Character
+						if targetChar then
+							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+							local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+
+							if targetRoot and targetHum and targetHum.Health > 0 then
+								pcall(function()
+									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
+									knife:Activate()
+								end)
+								task.wait(0.03)
+							end
+						end
+					end
+				end
+			end
+
+			task.wait(0.05)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- RANDOMIZED RESET / FLING LOGIC (FOR INNOCENTS / SHERIFFS / DEAD)
 --------------------------------------------------------------------------------
 local function touch(a, b)
 	pcall(function()
@@ -435,13 +518,13 @@ local function resetPlayerRandom(TargetPlayer)
 end
 
 --------------------------------------------------------------------------------
--- BACKGROUND RESET LOOP (RUNS FOR INNOCENTS, SHERIFFS, HEROES, & DEAD)
+-- BACKGROUND RESET LOOP (RUNS FOR NON-MURDERERS)
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(1) do
 		local myRole, _ = getPlayerData()
-		-- Run the reset loop for everyone EXCEPT the Murderer
 		if myRole ~= "Murderer" then
+			isMurdererLoopRunning = false
 			local char = LP.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			
@@ -479,7 +562,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- ROLE CHECKER & REACTION LOGIC (MURDERER ONLY)
+-- ROLE CHECKER & REACTION LOGIC
 --------------------------------------------------------------------------------
 function CheckRole()
 	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
@@ -490,28 +573,11 @@ function CheckRole()
 	if roundIdentifier ~= lastRoundIdentifier then
 		lastRoundIdentifier = roundIdentifier
 		CleanMap()
-		isMurdererActionExecuted = false
 
 		if myRole == "Murderer" then
-			if not isMurdererActionExecuted then
-				isMurdererActionExecuted = true
-				task.spawn(function()
-					task.wait(5) -- Wait 5 seconds
-					local baseCFrame = CFrame.new(620, 562, 35)
-					for i = 1, 2 do
-						local char = LP.Character
-						if char then
-							local root = char:FindFirstChild("HumanoidRootPart")
-							if root then
-								pcall(function()
-									root.CFrame = baseCFrame
-								end)
-							end
-						end
-						task.wait(0.2)
-					end
-				end)
-			end
+			runMurdererLogic()
+		else
+			isMurdererLoopRunning = false
 		end
 	end
 end
@@ -531,10 +597,10 @@ task.spawn(function()
 				if gunHeldTimer >= 5 then
 					isResettingFromHold = true
 					local _, murdererPlayerName = getPlayerData()
-					local isLocalRestricted = isWhitelisted(LP)
-					local isMurdererRestricted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
+					local isLocalWhitelisted = isWhitelisted(LP)
+					local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
 
-					if not (isLocalRestricted or isMurdererRestricted) then
+					if not (isLocalWhitelisted or isMurdererWhitelisted) then
 						local character = LP.Character
 						if character then
 							local humanoid = character:FindFirstChild("Humanoid")
@@ -550,13 +616,13 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- RESTRICTED / WHITELISTED USERS STILLNESS MONITOR
+-- WHITELISTED USERS STILLNESS MONITOR
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
 		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and not isResettingFromTargetStill then
 			if anyoneHasWeapon() then
-				for _, name in ipairs(restrictedNames) do
+				for name, _ in pairs(WHITELIST_EXACT) do
 					local targetPlayer = Players:FindFirstChild(name)
 					
 					if targetPlayer and not targetHasGun(targetPlayer) then
@@ -595,7 +661,7 @@ task.spawn(function()
 					end
 				end
 			else
-				for _, name in ipairs(restrictedNames) do
+				for name, _ in pairs(WHITELIST_EXACT) do
 					targetStillTimers[name] = 0
 					targetLastPositions[name] = nil
 				end
