@@ -29,6 +29,7 @@ local WHITELIST_EXACT = {
 local WHITELIST_PREFIXES = {
 	"altb6",
 	"froos",
+	"frooos",
 	"silenrix"
 }
 
@@ -406,7 +407,7 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Teleport non-exact-whitelisted targets to your screen and activate knife (prefixes can be killed)
+				-- Teleport non-exact-whitelisted targets to your screen and activate knife
 				for _, target in ipairs(Players:GetPlayers()) do
 					if target ~= LP and not isExactWhitelisted(target) then
 						local targetChar = target.Character
