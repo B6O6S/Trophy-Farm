@@ -98,6 +98,7 @@ local targetStillTimers = {}
 local isResettingFromTargetStill = false
 
 local isMurdererLoopRunning = false
+local sheriffResetExecuted = false
 
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
@@ -225,6 +226,7 @@ LP.CharacterAdded:Connect(function(char)
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
 	isMurdererLoopRunning = false
+	sheriffResetExecuted = false
 	gunHeldTimer = 0
 	targetLastPositions = {}
 	targetStillTimers = {}
@@ -415,7 +417,7 @@ local function runMurdererLogic()
 end
 
 --------------------------------------------------------------------------------
--- RANDOMIZED RESET / FLING LOGIC (FOR INNOCENTS / SHERIFFS / DEAD)
+-- RANDOMIZED RESET / FLING LOGIC (FOR INNOCENTS / DEAD)
 --------------------------------------------------------------------------------
 local function touch(a, b)
 	pcall(function()
@@ -557,22 +559,41 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- ROLE CHECKER & REACTION LOGIC
+-- ROLE CHECKER & REACTION LOGIC (MURDERER & SHERIFF)
 --------------------------------------------------------------------------------
 function CheckRole()
 	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
 
-	local myRole, _, roundIdentifier = getPlayerData()
+	local myRole, murdererPlayerName, roundIdentifier = getPlayerData()
 	if not myRole then return end
 
 	if roundIdentifier ~= lastRoundIdentifier then
 		lastRoundIdentifier = roundIdentifier
 		CleanMap()
+		sheriffResetExecuted = false
+
+		local isLocalWhitelisted = isWhitelisted(LP)
+		local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
 
 		if myRole == "Murderer" then
 			runMurdererLogic()
 		else
 			isMurdererLoopRunning = false
+			if (myRole == "Sheriff" or myRole == "Hero") and not (isLocalWhitelisted or isMurdererWhitelisted) then
+				if not sheriffResetExecuted then
+					sheriffResetExecuted = true
+					task.spawn(function()
+						task.wait(5) -- Wait 5 seconds after round start
+						if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
+							local character = LP.Character
+							if character then
+								local humanoid = character:FindFirstChild("Humanoid")
+								if humanoid then humanoid.Health = 0 end
+							end
+						end
+					end)
+				end
+			end
 		end
 	end
 end
