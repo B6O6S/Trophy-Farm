@@ -52,11 +52,6 @@ local function isWhitelisted(player)
 	return false
 end
 
--- Stop execution if LocalPlayer is whitelisted upon loading
-if isWhitelisted(LP) then
-	return
-end
-
 --------------------------------------------------------------------------------
 -- INITIAL LOAD GRACE PERIOD
 --------------------------------------------------------------------------------
