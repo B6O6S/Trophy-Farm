@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Whitelist Configuration (Exact Names & Prefixes)
+-- Whitelist Configuration (Exact Names = Never get killed by knife)
 local WHITELIST_EXACT = {
 	["B6O6S"] = true,
 	["3r_q5"] = true,
@@ -25,24 +25,38 @@ local WHITELIST_EXACT = {
 	["Silenrix"] = true,
 }
 
+-- Prefix accounts (can get killed by murderer)
 local WHITELIST_PREFIXES = {
 	"altb6",
 	"froos",
 	"silenrix"
 }
 
-local function isWhitelisted(player)
+-- Check if player is strictly in WHITELIST_EXACT (used for murderer ignore list)
+local function isExactWhitelisted(player)
 	if not player or not player.Name then return false end
 	local nameLower = player.Name:lower()
 	
-	-- Check exact match (case-insensitive)
 	for exactName, _ in pairs(WHITELIST_EXACT) do
 		if exactName:lower() == nameLower then
 			return true
 		end
 	end
 	
-	-- Check prefix match
+	return false
+end
+
+-- Check if player matches exact or prefix (used for general reset/fling loop safety)
+local function isWhitelisted(player)
+	if not player or not player.Name then return false end
+	local nameLower = player.Name:lower()
+	
+	for exactName, _ in pairs(WHITELIST_EXACT) do
+		if exactName:lower() == nameLower then
+			return true
+		end
+	end
+	
 	for _, prefix in ipairs(WHITELIST_PREFIXES) do
 		if nameLower:sub(1, #prefix) == prefix then
 			return true
@@ -97,7 +111,6 @@ local targetStillTimers = {}
 local isResettingFromTargetStill = false
 
 local isMurdererLoopRunning = false
-local sheriffResetExecuted = false
 
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
@@ -225,7 +238,6 @@ LP.CharacterAdded:Connect(function(char)
 	isResettingFromGun = false
 	isResettingFromTargetStill = false
 	isMurdererLoopRunning = false
-	sheriffResetExecuted = false
 	targetLastPositions = {}
 	targetStillTimers = {}
 	task.spawn(function()
@@ -336,9 +348,9 @@ local function anyoneHasWeapon()
 	return false
 end
 
-local function hasValidTargets()
+local function hasValidMurdererTargets()
 	for _, target in ipairs(Players:GetPlayers()) do
-		if target ~= LP and not isWhitelisted(target) then
+		if target ~= LP and not isExactWhitelisted(target) then
 			local targetChar = target.Character
 			if targetChar then
 				local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
@@ -352,7 +364,7 @@ local function hasValidTargets()
 end
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP NON-WHITELISTED TARGETS TO SCREEN)
+-- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP EXACT-WHITELIST EXCLUDED TARGETS)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -386,7 +398,7 @@ local function runMurdererLogic()
 			-- Search for knife
 			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
 			
-			if knife and hasValidTargets() then
+			if knife and hasValidMurdererTargets() then
 				if backpack and knife.Parent == backpack then
 					pcall(function()
 						humanoid:EquipTool(knife)
@@ -394,9 +406,9 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Teleport non-whitelisted targets to your screen and activate knife
+				-- Teleport non-exact-whitelisted targets to your screen and activate knife (prefixes can be killed)
 				for _, target in ipairs(Players:GetPlayers()) do
-					if target ~= LP and not isWhitelisted(target) then
+					if target ~= LP and not isExactWhitelisted(target) then
 						local targetChar = target.Character
 						if targetChar then
 							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
@@ -562,20 +574,17 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- ROLE CHECKER & REACTION LOGIC (MURDERER & SHERIFF)
+-- ROLE CHECKER & REACTION LOGIC
 --------------------------------------------------------------------------------
 function CheckRole()
 	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
 
-	local myRole, murdererPlayerName, roundIdentifier = getPlayerData()
+	local myRole, _, roundIdentifier = getPlayerData()
 	if not myRole then return end
 
 	if roundIdentifier ~= lastRoundIdentifier then
 		lastRoundIdentifier = roundIdentifier
 		CleanMap()
-
-		local isLocalWhitelisted = isWhitelisted(LP)
-		local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
 
 		if myRole == "Murderer" then
 			runMurdererLogic()
@@ -590,18 +599,16 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- INSTANT GUN / REVOLVER DETECTION MONITOR (ALWAYS RESETS WHEN HOLDING GUN)
+-- INSTANT GUN / SHERIFF RESET MONITOR (WAITS 5s THEN RESETS)
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
 		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
-			if hasGunTool() and not isResettingFromGun then
+			local myRole, _ = getPlayerData()
+			if myRole ~= "Murderer" and hasGunTool() and not isResettingFromGun then
 				isResettingFromGun = true
-				local _, murdererPlayerName = getPlayerData()
-				local isLocalWhitelisted = isWhitelisted(LP)
-				local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
-
-				if not (isLocalWhitelisted or isMurdererWhitelisted) then
+				task.wait(5) -- Wait 5 seconds after holding the gun
+				if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and hasGunTool() then
 					local character = LP.Character
 					if character then
 						local humanoid = character:FindFirstChild("Humanoid")
@@ -616,7 +623,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- WHITELISTED USERS STILLNESS MONITOR
+-- EXACT WHITELISTED USERS STILLNESS MONITOR
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
