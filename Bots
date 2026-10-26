@@ -90,8 +90,7 @@ end
 -- STATE
 --------------------------------------------------------------------------------
 local lastRoundIdentifier = nil
-local gunHeldTimer = 0
-local isResettingFromHold = false
+local isResettingFromGun = false
 
 local targetLastPositions = {}
 local targetStillTimers = {}
@@ -223,11 +222,10 @@ end)
 
 LP.CharacterAdded:Connect(function(char)
 	scriptLoadTime = tick()
-	isResettingFromHold = false
+	isResettingFromGun = false
 	isResettingFromTargetStill = false
 	isMurdererLoopRunning = false
 	sheriffResetExecuted = false
-	gunHeldTimer = 0
 	targetLastPositions = {}
 	targetStillTimers = {}
 	task.spawn(function()
@@ -296,9 +294,14 @@ local function getPlayerData()
 	return myRole, murdererPlayerName, roundIdentifier
 end
 
-local function isHoldingGun()
+local function hasGunTool()
 	local char = LP.Character
+	local bp = LP:FindFirstChild("Backpack")
+	
 	if char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver")) then
+		return true
+	end
+	if bp and (bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver")) then
 		return true
 	end
 	return false
@@ -391,7 +394,7 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Teleport non-whitelisted targets to your screen and activate knife (whitelisted players are completely ignored)
+				-- Teleport non-whitelisted targets to your screen and activate knife
 				for _, target in ipairs(Players:GetPlayers()) do
 					if target ~= LP and not isWhitelisted(target) then
 						local targetChar = target.Character
@@ -570,7 +573,6 @@ function CheckRole()
 	if roundIdentifier ~= lastRoundIdentifier then
 		lastRoundIdentifier = roundIdentifier
 		CleanMap()
-		sheriffResetExecuted = false
 
 		local isLocalWhitelisted = isWhitelisted(LP)
 		local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
@@ -579,21 +581,6 @@ function CheckRole()
 			runMurdererLogic()
 		else
 			isMurdererLoopRunning = false
-			if (myRole == "Sheriff" or myRole == "Hero") and not (isLocalWhitelisted or isMurdererWhitelisted) then
-				if not sheriffResetExecuted then
-					sheriffResetExecuted = true
-					task.spawn(function()
-						task.wait(5) -- Wait 5 seconds after round start
-						if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
-							local character = LP.Character
-							if character then
-								local humanoid = character:FindFirstChild("Humanoid")
-								if humanoid then humanoid.Health = 0 end
-							end
-						end
-					end)
-				end
-			end
 		end
 	end
 end
@@ -603,29 +590,26 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- CONTINUOUS GUN HOLD TIMER MONITORING
+-- INSTANT GUN / REVOLVER DETECTION MONITOR (ALWAYS RESETS WHEN HOLDING GUN)
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
 		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
-			if isHoldingGun() and not isResettingFromHold then
-				gunHeldTimer = gunHeldTimer + 0.5
-				if gunHeldTimer >= 5 then
-					isResettingFromHold = true
-					local _, murdererPlayerName = getPlayerData()
-					local isLocalWhitelisted = isWhitelisted(LP)
-					local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
+			if hasGunTool() and not isResettingFromGun then
+				isResettingFromGun = true
+				local _, murdererPlayerName = getPlayerData()
+				local isLocalWhitelisted = isWhitelisted(LP)
+				local isMurdererWhitelisted = murdererPlayerName and isWhitelisted(Players:FindFirstChild(murdererPlayerName))
 
-					if not (isLocalWhitelisted or isMurdererWhitelisted) then
-						local character = LP.Character
-						if character then
-							local humanoid = character:FindFirstChild("Humanoid")
-							if humanoid then humanoid.Health = 0 end
-						end
+				if not (isLocalWhitelisted or isMurdererWhitelisted) then
+					local character = LP.Character
+					if character then
+						local humanoid = character:FindFirstChild("Humanoid")
+						if humanoid then humanoid.Health = 0 end
 					end
 				end
-			else
-				gunHeldTimer = 0
+			elseif not hasGunTool() then
+				isResettingFromGun = false
 			end
 		end
 	end
