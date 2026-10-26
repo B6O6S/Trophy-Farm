@@ -14,6 +14,9 @@ local Camera = Workspace.CurrentCamera
 
 local LocalPlayer = Players.LocalPlayer
 
+-- Server Join Start Time
+local serverJoinTime = tick()
+
 -- Config File Name
 local CONFIG_FILE = "EliteAutomationSettings.json"
 
@@ -95,6 +98,24 @@ local visitedCoins = {}
 local votedChar = nil
 local coinHighlights = {}
 
+-- Helper Function to Format Time Interval
+local function formatDuration(seconds)
+	local days = math.floor(seconds / 86400)
+	local hours = math.floor((seconds % 86400) / 3600)
+	local minutes = math.floor((seconds % 3600) / 60)
+	local secs = math.floor(seconds % 60)
+	
+	if days > 0 then
+		return string.format("%dd %dh %dm %ds", days, hours, minutes, secs)
+	elseif hours > 0 then
+		return string.format("%dh %dm %ds", hours, hours, minutes, secs)
+	elseif minutes > 0 then
+		return string.format("%dm %ds", minutes, secs)
+	else
+		return string.format("%ds", secs)
+	end
+end
+
 -- Reset State On Respawn
 local function onCharacterAdded(char)
 	isBagFull = false
@@ -171,6 +192,7 @@ local function applyFpsBoost(enable)
 			Lighting.GlobalShadows = false
 			Lighting.FogEnd = 9e9
 			Lighting.Technology = Enum.Technology.Compatibility
+			Lighting.ClockTime = 0 -- Set night time
 			
 			for _, obj in ipairs(Lighting:GetChildren()) do
 				obj:Destroy()
@@ -220,6 +242,7 @@ local function applyFpsBoost(enable)
 				end)
 			end
 		else
+			Lighting.ClockTime = 14 -- Restore default daytime
 			if lightingConnection then
 				lightingConnection:Disconnect()
 				lightingConnection = nil
@@ -237,6 +260,7 @@ Players.PlayerAdded:Connect(function(plr)
 		if isFpsBoosterActive then
 			task.wait(0.5)
 			pcall(function()
+				Lighting.ClockTime = 0
 				for _, acc in ipairs(char:GetChildren()) do
 					if acc:IsA("Accessory") or acc:IsA("Hat") then
 						acc:Destroy()
@@ -250,6 +274,7 @@ end)
 RunService.Heartbeat:Connect(function()
 	if isFpsBoosterActive then
 		pcall(function()
+			Lighting.ClockTime = 0
 			for _, obj in ipairs(Lighting:GetChildren()) do
 				obj:Destroy()
 			end
@@ -390,7 +415,7 @@ end
 --------------------------------------------------------
 -- GUI CREATION (ZANWAH HUB)
 --------------------------------------------------------
-local speedInput, heightInput, radiusInput, statusLabel, cphLabel, headerFpsLabel, headerPingLabel
+local speedInput, heightInput, radiusInput, statusLabel, cphLabel, sessionCoinsLabel, serverTimerLabel, headerFpsLabel, headerPingLabel
 local isMinimized = false
 
 task.spawn(function()
@@ -409,7 +434,7 @@ task.spawn(function()
 	screenGui.Parent = playerGui
 
 	local mainFrame = Instance.new("Frame")
-	mainFrame.Size = UDim2.new(0, 240, 0, 360)
+	mainFrame.Size = UDim2.new(0, 240, 0, 420)
 	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 	mainFrame.BorderSizePixel = 0
@@ -486,7 +511,7 @@ task.spawn(function()
 	contentContainer.Position = UDim2.new(0, 5, 0, 34)
 	contentContainer.BackgroundTransparency = 1
 	contentContainer.BorderSizePixel = 0
-	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 410)
+	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 470)
 	contentContainer.ScrollBarThickness = 2
 	contentContainer.Parent = mainFrame
 
@@ -497,7 +522,7 @@ task.spawn(function()
 			mainFrame:TweenSize(UDim2.new(0, 240, 0, 32), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
 			minimizeBtn.Text = "+"
 		else
-			mainFrame:TweenSize(UDim2.new(0, 240, 0, 360), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
+			mainFrame:TweenSize(UDim2.new(0, 240, 0, 420), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
 				contentContainer.Visible = true
 			end)
 			minimizeBtn.Text = "–"
@@ -636,6 +661,48 @@ task.spawn(function()
 	cphLabel.TextXAlignment = Enum.TextXAlignment.Left
 	cphLabel.Parent = cphBox
 
+	-- Session Coins Box
+	local sessionCoinsBox = Instance.new("Frame")
+	sessionCoinsBox.Size = UDim2.new(1, 0, 0, 26)
+	sessionCoinsBox.Position = UDim2.new(0, 0, 0, 344)
+	sessionCoinsBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+	sessionCoinsBox.BorderSizePixel = 0
+	sessionCoinsBox.Parent = contentContainer
+
+	Instance.new("UICorner", sessionCoinsBox).CornerRadius = UDim.new(0, 4)
+
+	sessionCoinsLabel = Instance.new("TextLabel")
+	sessionCoinsLabel.Size = UDim2.new(1, -8, 1, 0)
+	sessionCoinsLabel.Position = UDim2.new(0, 4, 0, 0)
+	sessionCoinsLabel.BackgroundTransparency = 1
+	sessionCoinsLabel.Text = "Session Coins: 0"
+	sessionCoinsLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	sessionCoinsLabel.TextSize = 9
+	sessionCoinsLabel.Font = Enum.Font.GothamBold
+	sessionCoinsLabel.TextXAlignment = Enum.TextXAlignment.Left
+	sessionCoinsLabel.Parent = sessionCoinsBox
+
+	-- Server Time Elapsed Box
+	local serverTimerBox = Instance.new("Frame")
+	serverTimerBox.Size = UDim2.new(1, 0, 0, 26)
+	serverTimerBox.Position = UDim2.new(0, 0, 0, 374)
+	serverTimerBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+	serverTimerBox.BorderSizePixel = 0
+	serverTimerBox.Parent = contentContainer
+
+	Instance.new("UICorner", serverTimerBox).CornerRadius = UDim.new(0, 4)
+
+	serverTimerLabel = Instance.new("TextLabel")
+	serverTimerLabel.Size = UDim2.new(1, -8, 1, 0)
+	serverTimerLabel.Position = UDim2.new(0, 4, 0, 0)
+	serverTimerLabel.BackgroundTransparency = 1
+	serverTimerLabel.Text = "Server Time: 0s"
+	serverTimerLabel.TextColor3 = Color3.fromRGB(200, 180, 255)
+	serverTimerLabel.TextSize = 9
+	serverTimerLabel.Font = Enum.Font.GothamBold
+	serverTimerLabel.TextXAlignment = Enum.TextXAlignment.Left
+	serverTimerLabel.Parent = serverTimerBox
+
 	if isFpsBoosterActive then
 		applyFpsBoost(true)
 	end
@@ -661,7 +728,7 @@ task.spawn(function()
 			foundCoinsMidTimer = false
 			hasTriggeredWeaponTimer = false
 			trackedPickupCoins = {}
-			if hrp then lastPosition = hrp.Position end
+			if rootPart then lastPosition = rootPart.Position end
 			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
 		else
 			statusLabel.Text = "Status: Idle / Ready"
@@ -745,10 +812,17 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------
--- REALTIME FPS & PING RENDERSTEPPED LOOP
+-- REALTIME FPS, PING & SERVER TIMER RENDERSTEPPED LOOP
 --------------------------------------------------------
 RunService.RenderStepped:Connect(function(dt)
 	frameCount = frameCount + 1
+	
+	-- Update Server Time Elapsed Counter
+	if serverTimerLabel then
+		local serverElapsed = tick() - serverJoinTime
+		serverTimerLabel.Text = "Server Time: " .. formatDuration(serverElapsed)
+	end
+
 	if tick() - lastFpsUpdate >= 1 then
 		currentFps = math.floor(frameCount / (tick() - lastFpsUpdate))
 		frameCount = 0
@@ -1001,6 +1075,11 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
+	-- Update Session Coins Display
+	if sessionCoinsLabel then
+		sessionCoinsLabel.Text = string.format("Session Coins: %d", coinsCollectedSession)
+	end
+
 	-- Scan Active Map Coins
 	local containers = getCoinContainers()
 	local allDescendants = {}
@@ -1124,36 +1203,37 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- Bag Full Triggered: Teleport, Hold for 3s with Weapon, then Reset
+	-- Bag Full Triggered: Teleport Once, Anchor, Hold for 3s with Weapon, then Reset
 	if isBagFull then
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
-		isScriptTeleporting = true
-		rootPart.Anchored = false
-		if rootPart:FindFirstChild("SmoothFarmVelocity") then
-			rootPart.SmoothFarmVelocity:Destroy()
-		end
+		if not hasTeleportedToSafeZone then
+			isScriptTeleporting = true
+			rootPart.Anchored = false
+			if rootPart:FindFirstChild("SmoothFarmVelocity") then
+				rootPart.SmoothFarmVelocity:Destroy()
+			end
 
-		if humanoid then
-			humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-		end
-		
-		if character then
-			for _, part in ipairs(character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.CanCollide = true
+			if humanoid then
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+			end
+			
+			if character then
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = true
+					end
 				end
 			end
-		end
 
-		if not hasTeleportedToSafeZone then
 			rootPart.CFrame = CFrame.new(610, 562, 60)
+			rootPart.Anchored = true -- Prevent floating
 			hasTeleportedToSafeZone = true
+			lastPosition = rootPart.Position
+			task.delay(0.2, function() isScriptTeleporting = false end)
 		end
-		lastPosition = rootPart.Position
-		task.delay(0.2, function() isScriptTeleporting = false end)
 
 		safeZoneTimer = safeZoneTimer + dt
 		local remainingSafeTime = math.max(0, math.ceil(HOLD_SAFEZONE_TIME - safeZoneTimer))
