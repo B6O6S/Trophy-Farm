@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Restricted Users List (Safe Players to NOT attack)
+-- Restricted / Whitelist Users List (Safe Players to NOT reset)
 local restrictedNames = {"B6O6S", "3r_q5", "FROOS114", "Silenrix"}
 
 local function isRestrictedUser(playerName)
@@ -79,7 +79,7 @@ local targetLastPositions = {}
 local targetStillTimers = {}
 local isResettingFromTargetStill = false
 
-local isMurdererLoopRunning = false
+local isMurdererActionExecuted = false
 
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
@@ -206,7 +206,7 @@ LP.CharacterAdded:Connect(function(char)
 	scriptLoadTime = tick()
 	isResettingFromHold = false
 	isResettingFromTargetStill = false
-	isMurdererLoopRunning = false
+	isMurdererActionExecuted = false
 	gunHeldTimer = 0
 	targetLastPositions = {}
 	targetStillTimers = {}
@@ -313,91 +313,189 @@ local function anyoneHasWeapon()
 	return false
 end
 
-local function hasValidTargets()
-	for _, target in ipairs(Players:GetPlayers()) do
-		if target ~= LP and not isRestrictedUser(target.Name) then
-			local targetChar = target.Character
-			if targetChar then
-				local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-				if targetHum and targetHum.Health > 0 then
-					return true
+--------------------------------------------------------------------------------
+-- RANDOMIZED RESET / FLING LOGIC
+--------------------------------------------------------------------------------
+local function touch(a, b)
+	pcall(function()
+		firetouchinterest(a, b, 0)
+		firetouchinterest(a, b, 1)
+	end)
+end
+
+local function setRootReference(root, target)
+	pcall(function()
+		sethiddenproperty(root, "PhysicsRepRootRef", InstanceHandle.new(target))
+		sethiddenproperty(root, "PhysicsRepRootPart", target)
+	end)
+end
+
+local function clearRootReference(root)
+	pcall(function()
+		sethiddenproperty(root, "PhysicsRepRootRef", nil)
+		sethiddenproperty(root, "PhysicsRepRootPart", nil)
+	end)
+end
+
+local function fullyRestoreCharacter(character, savedData)
+	if not character or not savedData then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then return end
+	humanoid.PlatformStand = false
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	rootPart.CFrame = savedData.cframe
+	clearRootReference(rootPart)
+	humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") then part.CanCollide = true end
+	end
+end
+
+local function resetPlayerRandom(TargetPlayer)
+	if not TargetPlayer or TargetPlayer == LP then return end
+	if isRestrictedUser(TargetPlayer.Name) then return end
+	
+	local Character = LP.Character
+	if not Character then return end
+	local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+	local RootPart = Humanoid and Humanoid.RootPart
+	local TCharacter = TargetPlayer.Character
+	if not (Character and Humanoid and RootPart and TCharacter) then return end
+	local TRootPart = TCharacter:FindFirstChild("HumanoidRootPart")
+	local THead = TCharacter:FindFirstChild("Head")
+	if not TRootPart then return end
+
+	local savedData = { cframe = RootPart.CFrame }
+	Humanoid.PlatformStand = true
+	
+	local bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	bv.Velocity = Vector3.new(0, -50000, 0)
+	bv.Parent = RootPart
+	
+	local bg = Instance.new("BodyGyro")
+	bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+	bg.P = 1000000
+	bg.Parent = RootPart
+
+	local previousDestroyHeight = Workspace.FallenPartsDestroyHeight
+	Workspace.FallenPartsDestroyHeight = 0/0
+	local startTime = tick()
+
+	local randomOffset = Vector3.new(math.random(-5, 5), math.random(2, 8), math.random(-5, 5))
+	local randomAngVel = Vector3.new(math.random(5000, 10000), math.random(5000, 10000), math.random(5000, 10000))
+
+	local conn
+	conn = RunService.Heartbeat:Connect(function()
+		if tick() - startTime > 1 or not TargetPlayer.Character or not TRootPart.Parent then
+			Workspace.FallenPartsDestroyHeight = previousDestroyHeight
+			if bv.Parent then bv:Destroy() end
+			if bg.Parent then bg:Destroy() end
+			clearRootReference(RootPart)
+			fullyRestoreCharacter(Character, savedData)
+			if conn then conn:Disconnect() end
+			return
+		end
+		if TRootPart and TRootPart.Parent then
+			local targetPos = THead and THead.Position or (TRootPart.Position + randomOffset)
+			RootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.random() * math.pi, math.random() * math.pi, 0)
+			RootPart.AssemblyLinearVelocity = Vector3.new(math.random(-500, 500), -50000, math.random(-500, 500))
+			RootPart.AssemblyAngularVelocity = randomAngVel
+			for i = 1, 3 do
+				touch(RootPart, TRootPart)
+			end
+			setRootReference(RootPart, TRootPart)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- BACKGROUND RESET LOOP (RUNS FOR INNOCENTS, SHERIFFS, HEROES, & DEAD)
+--------------------------------------------------------------------------------
+task.spawn(function()
+	while task.wait(1) do
+		local myRole, _ = getPlayerData()
+		-- Run the reset loop for everyone EXCEPT the Murderer
+		if myRole ~= "Murderer" then
+			local char = LP.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			
+			if hum and hum.Health > 0 then
+				for _, p in ipairs(Players:GetPlayers()) do
+					if p ~= LP and not isRestrictedUser(p.Name) then
+						resetPlayerRandom(p)
+						task.wait(0.2)
+					end
+				end
+			else
+				-- Ghost / Dead fallback method
+				for _, p in ipairs(Players:GetPlayers()) do
+					if p ~= LP and not isRestrictedUser(p.Name) then
+						pcall(function()
+							local tChar = p.Character
+							local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+							if tRoot and char then
+								local myRoot = char:FindFirstChild("HumanoidRootPart")
+								if myRoot then
+									myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 3, 0)
+									myRoot.AssemblyLinearVelocity = Vector3.new(0, -50000, 0)
+									for i = 1, 3 do
+										touch(myRoot, tRoot)
+									end
+								end
+							end
+						end)
+						task.wait(0.2)
+					end
 				end
 			end
 		end
 	end
-	return false
-end
+end)
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (STAY AT 620, 562, 35 -> BRING TARGETS TO YOU)
+-- ROLE CHECKER & REACTION LOGIC (MURDERER ONLY)
 --------------------------------------------------------------------------------
-local function runMurdererLogic()
-	if isMurdererLoopRunning then return end
-	isMurdererLoopRunning = true
+function CheckRole()
+	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
 
-	task.spawn(function()
-		-- Wait 5 seconds after role start
-		task.wait(5)
+	local myRole, _, roundIdentifier = getPlayerData()
+	if not myRole then return end
 
-		local baseCFrame = CFrame.new(620, 562, 35)
+	if roundIdentifier ~= lastRoundIdentifier then
+		lastRoundIdentifier = roundIdentifier
+		CleanMap()
+		isMurdererActionExecuted = false
 
-		while isMurdererLoopRunning do
-			local char = LP.Character
-			local backpack = LP:FindFirstChild("Backpack")
-			
-			if not char then
-				task.wait(0.1)
-				continue
-			end
-
-			local humanoid = char:FindFirstChildOfClass("Humanoid")
-			local root = char:FindFirstChild("HumanoidRootPart")
-
-			if not (humanoid and root and humanoid.Health > 0) then
-				break
-			end
-
-			-- Hold stationary position at target base
-			pcall(function()
-				root.CFrame = baseCFrame
-			end)
-
-			-- Search for knife
-			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
-			
-			if knife and hasValidTargets() then
-				-- Equip knife if in backpack
-				if backpack and knife.Parent == backpack then
-					pcall(function()
-						humanoid:EquipTool(knife)
-					end)
-					task.wait(0.05)
-				end
-
-				-- Teleport non-restricted targets to your screen (directly in front of you) and attack
-				for _, target in ipairs(Players:GetPlayers()) do
-					if target ~= LP and not isRestrictedUser(target.Name) then
-						local targetChar = target.Character
-						if targetChar then
-							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-							local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-
-							if targetRoot and targetHum and targetHum.Health > 0 then
+		if myRole == "Murderer" then
+			if not isMurdererActionExecuted then
+				isMurdererActionExecuted = true
+				task.spawn(function()
+					task.wait(5) -- Wait 5 seconds
+					local baseCFrame = CFrame.new(620, 562, 35)
+					for i = 1, 2 do
+						local char = LP.Character
+						if char then
+							local root = char:FindFirstChild("HumanoidRootPart")
+							if root then
 								pcall(function()
-									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
-									knife:Activate()
+									root.CFrame = baseCFrame
 								end)
-								task.wait(0.03)
 							end
 						end
+						task.wait(0.2)
 					end
-				end
+				end)
 			end
-
-			task.wait(0.05)
 		end
-	end)
+	end
 end
+
+RunService.RenderStepped:Connect(function()
+	pcall(CheckRole)
+end)
 
 --------------------------------------------------------------------------------
 -- CONTINUOUS GUN HOLD TIMER MONITORING
@@ -481,51 +579,4 @@ task.spawn(function()
 			end
 		end
 	end
-end)
-
---------------------------------------------------------------------------------
--- ROLE CHECKER & REACTION LOGIC
---------------------------------------------------------------------------------
-function CheckRole()
-	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
-
-	local myRole, murdererPlayerName, roundIdentifier = getPlayerData()
-	if not myRole then return end
-
-	if roundIdentifier ~= lastRoundIdentifier then
-		lastRoundIdentifier = roundIdentifier
-		CleanMap()
-		
-		if myRole then
-			task.spawn(function()
-				local isLocalRestricted = isRestrictedUser(LP.Name)
-				local isMurdererRestricted = murdererPlayerName and isRestrictedUser(murdererPlayerName)
-
-				if myRole == "Murderer" then
-					runMurdererLogic()
-					return
-
-				elseif myRole == "Innocent" then
-					return
-
-				elseif myRole == "Sheriff" or myRole == "Hero" then
-					if not (isLocalRestricted or isMurdererRestricted) then
-						task.wait(5)
-						if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
-							local character = LP.Character
-							if character then
-								local humanoid = character:FindFirstChild("Humanoid")
-								if humanoid then humanoid.Health = 0 end
-							end
-						end
-					end
-					return
-				end
-			end)
-		end
-	end
-end
-
-RunService.RenderStepped:Connect(function()
-	pcall(CheckRole)
 end)
