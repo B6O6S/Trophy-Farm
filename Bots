@@ -74,6 +74,22 @@ local scriptLoadTime = tick()
 local INITIAL_LOAD_DELAY = 5
 
 --------------------------------------------------------------------------------
+-- AUTO-UPDATE / REFRESH FROM GITHUB
+--------------------------------------------------------------------------------
+local GITHUB_RAW_URL = "https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"
+
+task.spawn(function()
+	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "" and not _G.RunningLatestVersion then
+		local success, result = pcall(function()
+			return game:HttpGet(GITHUB_RAW_URL .. "?t=" .. tick())
+		end)
+		if success and result and #result > 0 then
+			_G.RunningLatestVersion = true
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------
 -- AUTO RECONNECT & REJOIN HELPERS
 --------------------------------------------------------------------------------
 local currentPlaceId = game.PlaceId
