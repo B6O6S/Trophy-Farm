@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Whitelist Configuration (Exact Names = Never get killed by knife & triggers bot death if they die)
+-- Whitelist Configuration (Exact Names)
 local WHITELIST_EXACT = {
 	["B6O6S"] = true,
 	["3r_q5"] = true,
@@ -33,7 +33,7 @@ local WHITELIST_PREFIXES = {
 	"silenrix"
 }
 
--- Check if player is strictly in WHITELIST_EXACT (used for murderer ignore list & death sync)
+-- Check if player is strictly in WHITELIST_EXACT
 local function isExactWhitelisted(player)
 	if not player or not player.Name then return false end
 	local nameLower = player.Name:lower()
@@ -47,7 +47,7 @@ local function isExactWhitelisted(player)
 	return false
 end
 
--- Check if player matches exact or prefix (used for general reset/fling loop safety)
+-- Check if player matches exact or prefix
 local function isWhitelisted(player)
 	if not player or not player.Name then return false end
 	local nameLower = player.Name:lower()
@@ -71,20 +71,71 @@ end
 -- INITIAL LOAD GRACE PERIOD
 --------------------------------------------------------------------------------
 local scriptLoadTime = tick()
-local INITIAL_LOAD_DELAY = 5 -- Seconds to ignore resets after executing script
+local INITIAL_LOAD_DELAY = 5
 
 --------------------------------------------------------------------------------
--- AUTO-UPDATE / REFRESH FROM GITHUB
+-- AUTO RECONNECT & REJOIN HELPERS
 --------------------------------------------------------------------------------
-local GITHUB_RAW_URL = "https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Bots"
+local currentPlaceId = game.PlaceId
+local currentJobId = game.JobId
+
+local function reconnectToSameServer()
+	pcall(function()
+		if currentJobId and currentJobId ~= "" then
+			TeleportService:TeleportToPlaceInstance(currentPlaceId, currentJobId, LP)
+		else
+			TeleportService:Teleport(currentPlaceId, LP)
+		end
+	end)
+end
 
 task.spawn(function()
-	if GITHUB_RAW_URL and GITHUB_RAW_URL ~= "" and not _G.RunningLatestVersion then
-		local success, result = pcall(function()
-			return game:HttpGet(GITHUB_RAW_URL .. "?t=" .. tick())
-		end)
-		if success and result and #result > 0 then
-			_G.RunningLatestVersion = true
+	GuiService.ErrorMessageChanged:Connect(function()
+		task.wait(1)
+		reconnectToSameServer()
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		if player == LP then
+			task.wait(1)
+			reconnectToSameServer()
+		end
+	end)
+end)
+
+--------------------------------------------------------------------------------
+-- COMMAND / PROXIMITY MONITOR (RADIUS 50 CHECKPOINTS)
+--------------------------------------------------------------------------------
+local CHECKPOINT_RESET = Vector3.new(391, 313, 383)
+local CHECKPOINT_REJOIN = Vector3.new(291, 182, 282)
+local TRIGGER_RADIUS = 50
+
+task.spawn(function()
+	while task.wait(0.5) do
+		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
+			for name, _ in pairs(WHITELIST_EXACT) do
+				local p = Players:FindFirstChild(name)
+				if p and p ~= LP and p.Character then
+					local root = p.Character:FindFirstChild("HumanoidRootPart")
+					if root then
+						local pos = root.Position
+						
+						-- Checkpoint 1: Reset bot if whitelisted player is within 50 studs of 391, 313, 383
+						if (pos - CHECKPOINT_RESET).Magnitude <= TRIGGER_RADIUS then
+							local myChar = LP.Character
+							local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+							if myHum and myHum.Health > 0 then
+								myHum.Health = 0
+							end
+						end
+						
+						-- Checkpoint 2: Force rejoin server if whitelisted player is within 50 studs of 291, 182, 282
+						if (pos - CHECKPOINT_REJOIN).Magnitude <= TRIGGER_RADIUS then
+							reconnectToSameServer()
+							task.wait(5) -- Prevent spam teleports
+						end
+					end
+				end
+			end
 		end
 	end
 end)
@@ -145,35 +196,6 @@ local function applyCleanSky()
 	end
 end
 pcall(applyCleanSky)
-
---------------------------------------------------------------------------------
--- AUTO RECONNECT
---------------------------------------------------------------------------------
-local currentPlaceId = game.PlaceId
-local currentJobId = game.JobId
-
-local function reconnectToSameServer()
-	pcall(function()
-		if currentJobId and currentJobId ~= "" then
-			TeleportService:TeleportToPlaceInstance(currentPlaceId, currentJobId, LP)
-		else
-			TeleportService:Teleport(currentPlaceId, LP)
-		end
-	end)
-end
-
-task.spawn(function()
-	GuiService.ErrorMessageChanged:Connect(function()
-		task.wait(1)
-		reconnectToSameServer()
-	end)
-	Players.PlayerRemoving:Connect(function(player)
-		if player == LP then
-			task.wait(1)
-			reconnectToSameServer()
-		end
-	end)
-end)
 
 --------------------------------------------------------------------------------
 -- NO COLLISION
@@ -365,7 +387,7 @@ local function hasValidMurdererTargets()
 end
 
 --------------------------------------------------------------------------------
--- EXACT WHITELIST DEATH SYNC MONITOR (IF THEY DIE, YOU DIE)
+-- EXACT WHITELIST DEATH SYNC MONITOR
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.2) do
@@ -376,7 +398,6 @@ task.spawn(function()
 					local char = p.Character
 					local hum = char and char:FindFirstChildOfClass("Humanoid")
 					if hum and hum.Health <= 0 then
-						-- Exact whitelisted player is dead, kill local bot too
 						local myChar = LP.Character
 						local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
 						if myHum and myHum.Health > 0 then
@@ -390,14 +411,14 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP EXACT-WHITELIST EXCLUDED TARGETS)
+-- MURDERER AUTOMATION LOGIC
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
 	isMurdererLoopRunning = true
 
 	task.spawn(function()
-		task.wait(5) -- Wait 5 seconds after role start
+		task.wait(5)
 		local baseCFrame = CFrame.new(620, 562, 35)
 
 		while isMurdererLoopRunning do
@@ -416,12 +437,10 @@ local function runMurdererLogic()
 				break
 			end
 
-			-- Hold base position
 			pcall(function()
 				root.CFrame = baseCFrame
 			end)
 
-			-- Search for knife
 			local knife = char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))
 			
 			if knife and hasValidMurdererTargets() then
@@ -432,7 +451,6 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
-				-- Teleport non-exact-whitelisted targets to your screen and activate knife
 				for _, target in ipairs(Players:GetPlayers()) do
 					if target ~= LP and not isExactWhitelisted(target) then
 						local targetChar = target.Character
@@ -458,7 +476,7 @@ local function runMurdererLogic()
 end
 
 --------------------------------------------------------------------------------
--- RANDOMIZED RESET / FLING LOGIC (FOR INNOCENTS / DEAD)
+-- RANDOMIZED RESET / FLING LOGIC
 --------------------------------------------------------------------------------
 local function touch(a, b)
 	pcall(function()
@@ -556,7 +574,7 @@ local function resetPlayerRandom(TargetPlayer)
 end
 
 --------------------------------------------------------------------------------
--- BACKGROUND RESET LOOP (RUNS FOR NON-MURDERERS)
+-- BACKGROUND RESET LOOP
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(1) do
@@ -574,7 +592,6 @@ task.spawn(function()
 					end
 				end
 			else
-				-- Ghost / Dead fallback method
 				for _, p in ipairs(Players:GetPlayers()) do
 					if p ~= LP and not isWhitelisted(p) then
 						pcall(function()
@@ -600,7 +617,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- ROLE CHECKER & REACTION LOGIC
+-- ROLE CHECKER
 --------------------------------------------------------------------------------
 function CheckRole()
 	if tick() - scriptLoadTime <= INITIAL_LOAD_DELAY then return end
@@ -625,7 +642,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- INSTANT GUN / SHERIFF RESET MONITOR (WAITS 5s THEN RESETS)
+-- INSTANT GUN / SHERIFF RESET MONITOR
 --------------------------------------------------------------------------------
 task.spawn(function()
 	while task.wait(0.5) do
@@ -633,7 +650,7 @@ task.spawn(function()
 			local myRole, _ = getPlayerData()
 			if myRole ~= "Murderer" and hasGunTool() and not isResettingFromGun then
 				isResettingFromGun = true
-				task.wait(5) -- Wait 5 seconds after holding the gun
+				task.wait(5)
 				if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and hasGunTool() then
 					local character = LP.Character
 					if character then
@@ -643,61 +660,6 @@ task.spawn(function()
 				end
 			elseif not hasGunTool() then
 				isResettingFromGun = false
-			end
-		end
-	end
-end)
-
---------------------------------------------------------------------------------
--- EXACT WHITELISTED USERS STILLNESS MONITOR
---------------------------------------------------------------------------------
-task.spawn(function()
-	while task.wait(0.5) do
-		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY and not isResettingFromTargetStill then
-			if anyoneHasWeapon() then
-				for name, _ in pairs(WHITELIST_EXACT) do
-					local targetPlayer = Players:FindFirstChild(name)
-					
-					if targetPlayer and not targetHasGun(targetPlayer) then
-						if targetPlayer.Character then
-							local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-							if targetRoot then
-								local currentPos = targetRoot.Position
-								local lastPos = targetLastPositions[name]
-
-								if lastPos then
-									if (currentPos - lastPos).Magnitude < 0.5 then
-										targetStillTimers[name] = (targetStillTimers[name] or 0) + 0.5
-									else
-										targetStillTimers[name] = 0
-									end
-								else
-									targetStillTimers[name] = 0
-									targetLastPositions[name] = currentPos
-								end
-								targetLastPositions[name] = currentPos
-
-								if (targetStillTimers[name] or 0) >= 5 then
-									isResettingFromTargetStill = true
-									local character = LP.Character
-									if character then
-										local humanoid = character:FindFirstChild("Humanoid")
-										if humanoid then humanoid.Health = 0 end
-									end
-									break
-								end
-							end
-						end
-					else
-						targetStillTimers[name] = 0
-						targetLastPositions[name] = nil
-					end
-				end
-			else
-				for name, _ in pairs(WHITELIST_EXACT) do
-					targetStillTimers[name] = 0
-					targetLastPositions[name] = nil
-				end
 			end
 		end
 	end
