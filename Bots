@@ -17,7 +17,7 @@ local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 if not LP then return end
 
--- Whitelist Configuration (Exact Names = Never get killed by knife)
+-- Whitelist Configuration (Exact Names = Never get killed by knife & triggers bot death if they die)
 local WHITELIST_EXACT = {
 	["B6O6S"] = true,
 	["3r_q5"] = true,
@@ -33,7 +33,7 @@ local WHITELIST_PREFIXES = {
 	"silenrix"
 }
 
--- Check if player is strictly in WHITELIST_EXACT (used for murderer ignore list)
+-- Check if player is strictly in WHITELIST_EXACT (used for murderer ignore list & death sync)
 local function isExactWhitelisted(player)
 	if not player or not player.Name then return false end
 	local nameLower = player.Name:lower()
@@ -363,6 +363,31 @@ local function hasValidMurdererTargets()
 	end
 	return false
 end
+
+--------------------------------------------------------------------------------
+-- EXACT WHITELIST DEATH SYNC MONITOR (IF THEY DIE, YOU DIE)
+--------------------------------------------------------------------------------
+task.spawn(function()
+	while task.wait(0.2) do
+		if tick() - scriptLoadTime > INITIAL_LOAD_DELAY then
+			for name, _ in pairs(WHITELIST_EXACT) do
+				local p = Players:FindFirstChild(name)
+				if p and p ~= LP then
+					local char = p.Character
+					local hum = char and char:FindFirstChildOfClass("Humanoid")
+					if hum and hum.Health <= 0 then
+						-- Exact whitelisted player is dead, kill local bot too
+						local myChar = LP.Character
+						local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+						if myHum and myHum.Health > 0 then
+							myHum.Health = 0
+						end
+					end
+				end
+			end
+		end
+	end
+end)
 
 --------------------------------------------------------------------------------
 -- MURDERER AUTOMATION LOGIC (EQUIP KNIFE & TP EXACT-WHITELIST EXCLUDED TARGETS)
