@@ -427,17 +427,17 @@ task.spawn(function()
 		playerGui.ZanwahNotificationGui:Destroy()
 	end
 
-	-- ==================== TOP-PRIORITY MIDDLE NOTIFICATION GUI ====================
+	-- ==================== TOP-PRIORITY MIDDLE NOTIFICATION GUI (15 Seconds) ====================
 	local notifGui = Instance.new("ScreenGui")
 	notifGui.Name = "ZanwahNotificationGui"
 	notifGui.ResetOnSpawn = false
-	notifGui.DisplayOrder = 999999 -- Top priority above everything else
+	notifGui.DisplayOrder = 999999
 	notifGui.IgnoreGuiInset = true
 	notifGui.Parent = playerGui
 
 	local notifFrame = Instance.new("Frame")
 	notifFrame.Size = UDim2.new(0, 300, 0, 75)
-	notifFrame.Position = UDim2.new(0.5, -150, 0.5, -200) -- Starts above center for drop-down effect
+	notifFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
 	notifFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 	notifFrame.BorderSizePixel = 0
 	notifFrame.Parent = notifGui
@@ -453,7 +453,7 @@ task.spawn(function()
 	notifTitle.Size = UDim2.new(1, -20, 0, 24)
 	notifTitle.Position = UDim2.new(0, 10, 0, 8)
 	notifTitle.BackgroundTransparency = 1
-	notifTitle.Text = "⚡ ZANWAH HUB ⚡"
+	notifTitle.Text = "رازن:"
 	notifTitle.TextColor3 = Color3.fromRGB(255, 80, 80)
 	notifTitle.TextSize = 12
 	notifTitle.Font = Enum.Font.GothamBold
@@ -464,18 +464,18 @@ task.spawn(function()
 	notifText.Size = UDim2.new(1, -20, 0, 30)
 	notifText.Position = UDim2.new(0, 10, 0, 34)
 	notifText.BackgroundTransparency = 1
-	notifText.Text = "الله يلعن سمير"
+	notifText.Text = " الله يلعن سمير والحساوي"
 	notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
 	notifText.TextSize = 15
 	notifText.Font = Enum.Font.GothamBold
 	notifText.TextXAlignment = Enum.TextXAlignment.Center
 	notifText.Parent = notifFrame
 
-	-- Slide to exact center animation
+	-- Slide to center and stay for 15 seconds
 	task.spawn(function()
 		task.wait(0.3)
 		notifFrame:TweenPosition(UDim2.new(0.5, -150, 0.5, -37), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.5, true)
-		task.wait(5.5)
+		task.wait(15.0) -- Extended to 15 seconds
 		notifFrame:TweenPosition(UDim2.new(0.5, -150, 0.5, -200), Enum.EasingDirection.In, Enum.EasingStyle.Quart, 0.4, true, function()
 			notifGui:Destroy()
 		end)
@@ -881,7 +881,7 @@ task.spawn(function()
 	serverTimerLabel.TextXAlignment = Enum.TextXAlignment.Left
 	serverTimerLabel.Parent = serverTimerBox
 
-	-- ==================== BOT CONTROLLER SECTION (1s Teleport Delay) ====================
+	-- ==================== BOT CONTROLLER SECTION (Solid Black Outlines) ====================
 	local function createBotButton(name, posY, buttonText, targetCFrame)
 		local btn = Instance.new("TextButton")
 		btn.Name = name
@@ -899,8 +899,8 @@ task.spawn(function()
 		btnCorner.Parent = btn
 
 		local btnStroke = Instance.new("UIStroke")
-		btnStroke.Color = Color3.fromRGB(0, 170, 255)
-		btnStroke.Thickness = 1
+		btnStroke.Color = Color3.fromRGB(0, 0, 0) -- Solid black outline as requested
+		btnStroke.Thickness = 1.5
 		btnStroke.Parent = btn
 
 		btn.MouseButton1Click:Connect(function()
