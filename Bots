@@ -179,6 +179,7 @@ local targetStillTimers = {}
 local isResettingFromTargetStill = false
 
 local isMurdererLoopRunning = false
+local teleportedTargets = {} -- Tracks targets already teleported once this round
 
 --------------------------------------------------------------------------------
 -- LIGHTING & ENVIRONMENT OPTIMIZATION
@@ -277,6 +278,7 @@ LP.CharacterAdded:Connect(function(char)
 	isResettingFromGun = false
 	isResettingFromTargetStill = false
 	isMurdererLoopRunning = false
+	teleportedTargets = {}
 	targetLastPositions = {}
 	targetStillTimers = {}
 	task.spawn(function()
@@ -389,7 +391,7 @@ end
 
 local function hasValidMurdererTargets()
 	for _, target in ipairs(Players:GetPlayers()) do
-		if target ~= LP and not isExactWhitelisted(target) then
+		if target ~= LP and not isExactWhitelisted(target) and not teleportedTargets[target] then
 			local targetChar = target.Character
 			if targetChar then
 				local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
@@ -427,7 +429,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- MURDERER AUTOMATION LOGIC
+-- MURDERER AUTOMATION LOGIC (SINGLE TELEPORT PER TARGET)
 --------------------------------------------------------------------------------
 local function runMurdererLogic()
 	if isMurdererLoopRunning then return end
@@ -467,14 +469,16 @@ local function runMurdererLogic()
 					task.wait(0.05)
 				end
 
+				-- Teleport each non-whitelisted target ONCE
 				for _, target in ipairs(Players:GetPlayers()) do
-					if target ~= LP and not isExactWhitelisted(target) then
+					if target ~= LP and not isExactWhitelisted(target) and not teleportedTargets[target] then
 						local targetChar = target.Character
 						if targetChar then
 							local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
 							local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
 
 							if targetRoot and targetHum and targetHum.Health > 0 then
+								teleportedTargets[target] = true
 								pcall(function()
 									targetRoot.CFrame = root.CFrame * CFrame.new(0, 0, -2)
 									knife:Activate()
@@ -644,6 +648,7 @@ function CheckRole()
 	if roundIdentifier ~= lastRoundIdentifier then
 		lastRoundIdentifier = roundIdentifier
 		CleanMap()
+		teleportedTargets = {} -- Reset teleport tracking for the new round
 
 		if myRole == "Murderer" then
 			runMurdererLogic()
