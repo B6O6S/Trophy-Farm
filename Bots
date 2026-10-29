@@ -25,6 +25,7 @@ local WHITELIST_EXACT = {
 	["Silenrix"] = true,
 	["YASER_GEAMR"] = true,
 	["l6_ap"] = true,
+	["Ihab_77777"] = true,
 }
 
 -- Prefix accounts (can get killed by murderer)
