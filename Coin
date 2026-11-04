@@ -9,8 +9,8 @@ local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
 local Stats = game:GetService("Stats")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
 local Camera = Workspace.CurrentCamera
 
 local LocalPlayer = Players.LocalPlayer
@@ -25,15 +25,23 @@ local CONFIG_FILE = "EliteAutomationSettings.json"
 local settingsData = {
 	Speed = 60,
 	HeightOffset = 0,
-	AuraRadius = 12,
 	AutoFarm = false,
 	AutoVote = false,
+	CoinAura = false,
+	AvoidMurderer = false,
+	AutoFlingMurderer = false,
 	ShootMurderer = false,
 	AutoKillAll = false,
-	FpsBooster = false,
-	AutoRejoin = true,
+	AutoGrabGun = false,
 	ShowCoins = false,
-	OptimizedCoins = false
+	OptimizedCoins = false,
+	FpsBooster = false,
+	ShowCoinAuraBox = false,
+	AntiFling = true,
+	AntiAFK = true,
+	AutoRejoin = true,
+	AntiVoid = true,
+	FarmType = "Lay on back"
 }
 
 -- Load Saved Settings
@@ -59,28 +67,33 @@ end
 -- State Variables synced with Saved Settings
 local isFarmingActive = settingsData.AutoFarm
 local isAutoVoteActive = settingsData.AutoVote
+local isCoinAuraActive = settingsData.CoinAura
+local isAvoidMurdererActive = settingsData.AvoidMurderer
+local isAutoFlingMurdererActive = settingsData.AutoFlingMurderer
 local isShootMurdererActive = settingsData.ShootMurderer
 local isAutoKillAllActive = settingsData.AutoKillAll
-local isFpsBoosterActive = settingsData.FpsBooster
-local isAutoRejoinActive = settingsData.AutoRejoin
+local isAutoGrabGunActive = settingsData.AutoGrabGun
 local isShowCoinsActive = settingsData.ShowCoins
 local isOptimizedCoinsActive = settingsData.OptimizedCoins
+local isFpsBoosterActive = settingsData.FpsBooster
+local isShowCoinAuraBoxActive = settingsData.ShowCoinAuraBox
+local isAntiFlingActive = settingsData.AntiFling
+local isAntiAFKActive = settingsData.AntiAFK
+local isAutoRejoinActive = settingsData.AutoRejoin
+local isAntiVoidActive = settingsData.AntiVoid
+local currentFarmType = settingsData.FarmType or "Lay on back"
+
+if currentFarmType == "Running" then
+	currentFarmType = "Lay on back"
+end
 
 local isBagFull = false
 local hasTeleportedToSafeZone = false
 local coinsThisSpawn = 0
-local BAG_MAX_COINS = 50
 
--- Weapon Timer Mechanics Variables (Works for both Knife & Gun) - 30s
-local weaponTimer = 0
-local TIMER_THRESHOLD = 30
-local foundCoinsMidTimer = false
-local hasTriggeredWeaponTimer = false
-
--- 3-Second Hold & Reset State Variables
+-- Safe Zone Hold State Variables (No Reset)
 local safeZoneTimer = 0
 local HOLD_SAFEZONE_TIME = 3
-local isResetting = false
 
 -- Voting State Flag
 local isCurrentlyVoting = false
@@ -88,8 +101,14 @@ local isScriptTeleporting = false
 local lastPosition = Vector3.new(0, 0, 0)
 local isBotTeleporting = false
 
+-- Reset Player / Fling Variables
+local lastResetAttempt = 0
+local RESET_COORDINATE_COOLDOWN = 0.5
+local customResetDuration = 1
+local resetStartStuds = 5
+
 -- Coins Per Hour & Performance Tracker Variables
-local farmStartTime = tick()
+local farmStartTime = nil
 local coinsCollectedSession = 0
 local frameCount = 0
 local lastFpsUpdate = tick()
@@ -100,6 +119,10 @@ local currentTargetAnchor = nil
 local visitedCoins = {}
 local votedChar = nil
 local coinHighlights = {}
+local coinAuraBoxPart = nil
+
+-- Dynamic Performance Trackers for Predictive Shooting
+local currentPingVal = 0
 
 -- Helper Function to Format Time Interval
 local function formatDuration(seconds)
@@ -124,14 +147,10 @@ local function onCharacterAdded(char)
 	isBagFull = false
 	hasTeleportedToSafeZone = false
 	coinsThisSpawn = 0
-	weaponTimer = 0
 	safeZoneTimer = 0
-	isResetting = false
 	isCurrentlyVoting = false
 	isScriptTeleporting = false
 	isBotTeleporting = false
-	foundCoinsMidTimer = false
-	hasTriggeredWeaponTimer = false
 	visitedCoins = {}
 	trackedPickupCoins = {}
 	local hrp = char:WaitForChild("HumanoidRootPart", 5)
@@ -142,6 +161,51 @@ local function onCharacterAdded(char)
 end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- ==================== ANTI-FLING IMPLEMENTATION ====================
+local function SetupAntiFling()
+    local LastPosition = nil
+    RunService.Heartbeat:Connect(function()
+        if not isAntiFlingActive then return end
+        pcall(function()
+            local Character = LocalPlayer.Character
+            if not Character then return end
+            
+            local PrimaryPart = Character.PrimaryPart
+            if not PrimaryPart then return end
+
+            local linVel = PrimaryPart.AssemblyLinearVelocity.Magnitude
+            local angVel = PrimaryPart.AssemblyAngularVelocity.Magnitude
+
+            if linVel > 250 or angVel > 250 then
+                PrimaryPart.AssemblyAngularVelocity = Vector3.zero
+                PrimaryPart.AssemblyLinearVelocity = Vector3.zero
+                if LastPosition then
+                    PrimaryPart.CFrame = LastPosition
+                end
+            elseif linVel < 50 and angVel < 50 then
+                LastPosition = PrimaryPart.CFrame
+            end
+        end)
+    end)
+end
+
+SetupAntiFling()
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    SetupAntiFling()
+end)
+
+-- ==================== ANTI-AFK IMPLEMENTATION ====================
+if not getgenv().AntiAFKLoaded then 
+    getgenv().AntiAFKLoaded = true 
+    LocalPlayer.Idled:Connect(function() 
+        if isAntiAFKActive then
+            VirtualUser:CaptureController() 
+            VirtualUser:ClickButton2(Vector2.new()) 
+        end
+    end)
+end
 
 -- Instant Auto-Rejoin On Kick
 local function attemptRejoin()
@@ -176,7 +240,50 @@ end
 
 setupAutoRejoin()
 
--- ==================== FPS BOOSTER ENGINE (AGGRESSIVE & REAL-TIME) ====================
+-- ==================== ANTI VOID HANDLER ====================
+local function applyAntiVoid(enable)
+	pcall(function()
+		if enable then
+			Workspace.FallenPartsDestroyHeight = 0/0
+		else
+			Workspace.FallenPartsDestroyHeight = -500
+		end
+	end)
+end
+
+if isAntiVoidActive then
+	applyAntiVoid(true)
+end
+
+-- ==================== SHOW COIN AURA BOX HANDLER ====================
+local function updateCoinAuraBox(enable)
+	pcall(function()
+		if enable then
+			if not coinAuraBoxPart or not coinAuraBoxPart.Parent then
+				coinAuraBoxPart = Instance.new("Part")
+				coinAuraBoxPart.Name = "CoinAuraVisualBox"
+				coinAuraBoxPart.Size = Vector3.new(12, 12, 12)
+				coinAuraBoxPart.Color = Color3.fromRGB(0, 255, 100)
+				coinAuraBoxPart.Material = Enum.Material.SmoothPlastic
+				coinAuraBoxPart.Transparency = 0.85
+				coinAuraBoxPart.CanCollide = false
+				coinAuraBoxPart.Anchored = false
+				coinAuraBoxPart.Parent = Workspace
+			end
+		else
+			if coinAuraBoxPart then
+				coinAuraBoxPart:Destroy()
+				coinAuraBoxPart = nil
+			end
+		end
+	end)
+end
+
+if isShowCoinAuraBoxActive then
+	updateCoinAuraBox(true)
+end
+
+-- ==================== FPS BOOSTER ENGINE ====================
 local lightingConnection = nil
 local workspaceConnection = nil
 
@@ -350,24 +457,6 @@ local function hasGun()
 	return getGun() ~= nil
 end
 
-local function equipGun()
-	local gun = getGun()
-	if not gun then return false end
-	local char = LocalPlayer.Character
-	if not char then return false end
-	if gun.Parent == char then return true end
-	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid:UnequipTools()
-		task.wait(0.05)
-		humanoid:EquipTool(gun)
-		pcall(function() gun.Parent = char end)
-		task.wait(0.1)
-		return gun.Parent == char
-	end
-	return false
-end
-
 local function getKnife()
 	local char = LocalPlayer.Character
 	if char then
@@ -408,10 +497,25 @@ local function hasWeapon()
 	return hasKnife() or hasGun()
 end
 
+local function getMurd()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local bp = plr:FindFirstChild("Backpack")
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local isAlive = not hum or hum.Health > 0
+			if isAlive and ((bp and bp:FindFirstChild("Knife")) or (char and char:FindFirstChild("Knife"))) then
+				return plr
+			end
+		end
+	end
+	return nil
+end
+
 --------------------------------------------------------
 -- GUI CREATION (ZANWAH HUB)
 --------------------------------------------------------
-local speedInput, heightInput, radiusInput, statusLabel, cphLabel, sessionCoinsLabel, serverTimerLabel, headerFpsLabel, headerPingLabel
+local cphLabel, sessionCoinsLabel, roundCoinsLabel, serverTimerLabel, headerFpsLabel, headerPingLabel, avgCphLabel, statusLabel
 local isMinimized = false
 local isGuiVisible = true
 
@@ -427,7 +531,7 @@ task.spawn(function()
 		playerGui.ZanwahNotificationGui:Destroy()
 	end
 
-	-- ==================== TOP-PRIORITY MIDDLE NOTIFICATION GUI (15 Seconds) ====================
+	-- ==================== NOTIFICATION GUI ====================
 	local notifGui = Instance.new("ScreenGui")
 	notifGui.Name = "ZanwahNotificationGui"
 	notifGui.ResetOnSpawn = false
@@ -453,7 +557,7 @@ task.spawn(function()
 	notifTitle.Size = UDim2.new(1, -20, 0, 24)
 	notifTitle.Position = UDim2.new(0, 10, 0, 8)
 	notifTitle.BackgroundTransparency = 1
-	notifTitle.Text = "رازن:"
+	notifTitle.Text = "⚡ ZANWAH HUB ⚡"
 	notifTitle.TextColor3 = Color3.fromRGB(255, 80, 80)
 	notifTitle.TextSize = 12
 	notifTitle.Font = Enum.Font.GothamBold
@@ -464,21 +568,41 @@ task.spawn(function()
 	notifText.Size = UDim2.new(1, -20, 0, 30)
 	notifText.Position = UDim2.new(0, 10, 0, 34)
 	notifText.BackgroundTransparency = 1
-	notifText.Text = " الله يلعن سمير والحساوي"
+	notifText.Text = "الله يلعن سمير"
 	notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
 	notifText.TextSize = 15
 	notifText.Font = Enum.Font.GothamBold
 	notifText.TextXAlignment = Enum.TextXAlignment.Center
 	notifText.Parent = notifFrame
 
-	-- Slide to center and stay for 15 seconds
+	local closeNotifBtn = Instance.new("TextButton")
+	closeNotifBtn.Size = UDim2.new(0, 20, 0, 20)
+	closeNotifBtn.Position = UDim2.new(1, -25, 0, 6)
+	closeNotifBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+	closeNotifBtn.Text = "×"
+	closeNotifBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeNotifBtn.TextSize = 14
+	closeNotifBtn.Font = Enum.Font.GothamBold
+	closeNotifBtn.Parent = notifFrame
+	Instance.new("UICorner", closeNotifBtn).CornerRadius = UDim.new(0, 4)
+
+	local function dismissNotification()
+		if notifGui and notifGui.Parent then
+			notifFrame:TweenPosition(UDim2.new(0.5, -150, 0.5, -200), Enum.EasingDirection.In, Enum.EasingStyle.Quart, 0.4, true, function()
+				notifGui:Destroy()
+			end)
+		end
+	end
+
+	closeNotifBtn.MouseButton1Click:Connect(dismissNotification)
+
 	task.spawn(function()
 		task.wait(0.3)
 		notifFrame:TweenPosition(UDim2.new(0.5, -150, 0.5, -37), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.5, true)
-		task.wait(15.0) -- Extended to 15 seconds
-		notifFrame:TweenPosition(UDim2.new(0.5, -150, 0.5, -200), Enum.EasingDirection.In, Enum.EasingStyle.Quart, 0.4, true, function()
-			notifGui:Destroy()
-		end)
+		
+		-- Auto-close after 15 seconds if not already closed
+		task.wait(15.0)
+		dismissNotification()
 	end)
 
 	-- ==================== MAIN SCRIPT GUI ====================
@@ -489,7 +613,7 @@ task.spawn(function()
 	screenGui.IgnoreGuiInset = true
 	screenGui.Parent = playerGui
 
-	-- Floating Toggle Button (55x55, Transparent, Clamped to Screen Bounds)
+	-- Floating Toggle Button
 	local toggleGuiBtn = Instance.new("ImageButton")
 	toggleGuiBtn.Size = UDim2.new(0, 55, 0, 55)
 	toggleGuiBtn.Position = UDim2.new(0, 15, 0.3, 0)
@@ -498,49 +622,46 @@ task.spawn(function()
 	toggleGuiBtn.Active = true
 	toggleGuiBtn.Parent = screenGui
 
-	-- Finger-Centric Drag Logic with Screen Boundary Clamping
+	-- Seamless Dragging Logic (Fixed Jump)
 	local dragging = false
-	local dragInput, dragStart, startPos
+	local dragInput = nil
+	local dragStart = Vector2.zero
+	local startPos = UDim2.new()
 
 	toggleGuiBtn.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = Vector2.new(input.Position.X, input.Position.Y)
-			startPos = toggleGuiBtn.AbsolutePosition
+			startPos = toggleGuiBtn.Position
+			dragInput = input
 			
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
+					dragInput = nil
 				end
 			end)
 		end
 	end)
 
-	toggleGuiBtn.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-			dragInput = input
-		end
-	end)
-
 	UserInputService.InputChanged:Connect(function(input)
-		if dragging and input == dragInput then
+		if dragging and input == dragInput and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			local currentPos = Vector2.new(input.Position.X, input.Position.Y)
 			local delta = currentPos - dragStart
-			local newX = startPos.X + delta.X
-			local newY = startPos.Y + delta.Y
 			
 			local screenSize = screenGui.AbsoluteSize
 			local btnSize = toggleGuiBtn.AbsoluteSize
 			
-			newX = math.clamp(newX, 0, screenSize.X - btnSize.X)
-			newY = math.clamp(newY, 0, screenSize.Y - btnSize.Y)
+			local newX = math.clamp(startPos.X.Offset + delta.X, 0, screenSize.X - btnSize.X)
+			local newY = math.clamp(startPos.Y.Offset + delta.Y, 0, screenSize.Y - btnSize.Y)
 			
 			toggleGuiBtn.Position = UDim2.new(0, newX, 0, newY)
 		end
 	end)
 
+	-- Main Frame
 	local mainFrame = Instance.new("Frame")
-	mainFrame.Size = UDim2.new(0, 240, 0, 420)
+	mainFrame.Size = UDim2.new(0, 240, 0, 260)
 	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 	mainFrame.BorderSizePixel = 0
@@ -564,7 +685,6 @@ task.spawn(function()
 
 	Instance.new("UICorner", headerFrame).CornerRadius = UDim.new(0, 8)
 
-	-- Title Label
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Size = UDim2.new(0, 105, 1, 0)
 	titleLabel.Position = UDim2.new(0, 6, 0, 0)
@@ -576,7 +696,6 @@ task.spawn(function()
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Parent = headerFrame
 
-	-- FPS Header Label
 	headerFpsLabel = Instance.new("TextLabel")
 	headerFpsLabel.Size = UDim2.new(0, 38, 1, 0)
 	headerFpsLabel.Position = UDim2.new(0, 105, 0, 0)
@@ -588,7 +707,6 @@ task.spawn(function()
 	headerFpsLabel.TextXAlignment = Enum.TextXAlignment.Center
 	headerFpsLabel.Parent = headerFrame
 
-	-- Ping Header Label
 	headerPingLabel = Instance.new("TextLabel")
 	headerPingLabel.Size = UDim2.new(0, 38, 1, 0)
 	headerPingLabel.Position = UDim2.new(0, 145, 0, 0)
@@ -600,7 +718,6 @@ task.spawn(function()
 	headerPingLabel.TextXAlignment = Enum.TextXAlignment.Center
 	headerPingLabel.Parent = headerFrame
 
-	-- Minimize Content Button (–)
 	local minimizeBtn = Instance.new("TextButton")
 	minimizeBtn.Size = UDim2.new(0, 22, 0, 20)
 	minimizeBtn.Position = UDim2.new(1, -26, 0, 6)
@@ -617,7 +734,7 @@ task.spawn(function()
 		mainFrame.Visible = isGuiVisible
 	end)
 
-	-- Section Tab Switcher (AutoFarm vs Bot Controller)
+	-- Tabs Switcher (AutoFarm / Stats / Settings / Bots Control)
 	local tabContainer = Instance.new("Frame")
 	tabContainer.Size = UDim2.new(1, -10, 0, 26)
 	tabContainer.Position = UDim2.new(0, 5, 0, 38)
@@ -625,79 +742,124 @@ task.spawn(function()
 	tabContainer.Parent = mainFrame
 
 	local autoFarmTabBtn = Instance.new("TextButton")
-	autoFarmTabBtn.Size = UDim2.new(0.48, 0, 1, 0)
+	autoFarmTabBtn.Size = UDim2.new(0.23, 0, 1, 0)
 	autoFarmTabBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 80)
 	autoFarmTabBtn.Text = "AutoFarm"
 	autoFarmTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	autoFarmTabBtn.TextSize = 10
+	autoFarmTabBtn.TextSize = 8
 	autoFarmTabBtn.Font = Enum.Font.GothamBold
 	autoFarmTabBtn.Parent = tabContainer
 	Instance.new("UICorner", autoFarmTabBtn).CornerRadius = UDim.new(0, 4)
 
+	local statsTabBtn = Instance.new("TextButton")
+	statsTabBtn.Size = UDim2.new(0.23, 0, 1, 0)
+	statsTabBtn.Position = UDim2.new(0.25, 0, 0, 0)
+	statsTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
+	statsTabBtn.Text = "Stats"
+	statsTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	statsTabBtn.TextSize = 8
+	statsTabBtn.Font = Enum.Font.GothamBold
+	statsTabBtn.Parent = tabContainer
+	Instance.new("UICorner", statsTabBtn).CornerRadius = UDim.new(0, 4)
+
+	local settingsTabBtn = Instance.new("TextButton")
+	settingsTabBtn.Size = UDim2.new(0.23, 0, 1, 0)
+	settingsTabBtn.Position = UDim2.new(0.50, 0, 0, 0)
+	settingsTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
+	settingsTabBtn.Text = "Settings"
+	settingsTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	settingsTabBtn.TextSize = 8
+	settingsTabBtn.Font = Enum.Font.GothamBold
+	settingsTabBtn.Parent = tabContainer
+	Instance.new("UICorner", settingsTabBtn).CornerRadius = UDim.new(0, 4)
+
 	local botCtrlTabBtn = Instance.new("TextButton")
-	botCtrlTabBtn.Size = UDim2.new(0.48, 0, 1, 0)
-	botCtrlTabBtn.Position = UDim2.new(0.52, 0, 0, 0)
+	botCtrlTabBtn.Size = UDim2.new(0.23, 0, 1, 0)
+	botCtrlTabBtn.Position = UDim2.new(0.75, 0, 0, 0)
 	botCtrlTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
-	botCtrlTabBtn.Text = "Bot Controller"
+	botCtrlTabBtn.Text = "Bots Ctrl"
 	botCtrlTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	botCtrlTabBtn.TextSize = 10
+	botCtrlTabBtn.TextSize = 8
 	botCtrlTabBtn.Font = Enum.Font.GothamBold
 	botCtrlTabBtn.Parent = tabContainer
 	Instance.new("UICorner", botCtrlTabBtn).CornerRadius = UDim.new(0, 4)
 
-	-- AutoFarm Scroll Container
 	local autoFarmScroll = Instance.new("ScrollingFrame")
 	autoFarmScroll.Size = UDim2.new(1, -10, 1, -70)
 	autoFarmScroll.Position = UDim2.new(0, 5, 0, 68)
 	autoFarmScroll.BackgroundTransparency = 1
 	autoFarmScroll.BorderSizePixel = 0
-	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 440)
+	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 530)
 	autoFarmScroll.ScrollBarThickness = 2
 	autoFarmScroll.Visible = true
 	autoFarmScroll.Parent = mainFrame
 
-	-- Bot Controller Scroll Container
+	local statsScroll = Instance.new("ScrollingFrame")
+	statsScroll.Size = UDim2.new(1, -10, 1, -70)
+	statsScroll.Position = UDim2.new(0, 5, 0, 68)
+	statsScroll.BackgroundTransparency = 1
+	statsScroll.BorderSizePixel = 0
+	statsScroll.CanvasSize = UDim2.new(0, 0, 0, 185)
+	statsScroll.ScrollBarThickness = 2
+	statsScroll.Visible = false
+	statsScroll.Parent = mainFrame
+
+	local settingsScroll = Instance.new("ScrollingFrame")
+	settingsScroll.Size = UDim2.new(1, -10, 1, -70)
+	settingsScroll.Position = UDim2.new(0, 5, 0, 68)
+	settingsScroll.BackgroundTransparency = 1
+	settingsScroll.BorderSizePixel = 0
+	settingsScroll.CanvasSize = UDim2.new(0, 0, 0, 150)
+	settingsScroll.ScrollBarThickness = 2
+	settingsScroll.Visible = false
+	settingsScroll.Parent = mainFrame
+
 	local botCtrlScroll = Instance.new("ScrollingFrame")
 	botCtrlScroll.Size = UDim2.new(1, -10, 1, -70)
 	botCtrlScroll.Position = UDim2.new(0, 5, 0, 68)
 	botCtrlScroll.BackgroundTransparency = 1
 	botCtrlScroll.BorderSizePixel = 0
-	botCtrlScroll.CanvasSize = UDim2.new(0, 0, 0, 100)
+	botCtrlScroll.CanvasSize = UDim2.new(0, 0, 0, 150)
 	botCtrlScroll.ScrollBarThickness = 2
 	botCtrlScroll.Visible = false
 	botCtrlScroll.Parent = mainFrame
 
-	autoFarmTabBtn.MouseButton1Click:Connect(function()
-		autoFarmScroll.Visible = true
-		botCtrlScroll.Visible = false
-		autoFarmTabBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 80)
-		autoFarmTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		botCtrlTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
-		botCtrlTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	end)
+	local function switchTab(activeBtn)
+		autoFarmScroll.Visible = (activeBtn == autoFarmTabBtn)
+		statsScroll.Visible = (activeBtn == statsTabBtn)
+		settingsScroll.Visible = (activeBtn == settingsTabBtn)
+		botCtrlScroll.Visible = (activeBtn == botCtrlTabBtn)
 
-	botCtrlTabBtn.MouseButton1Click:Connect(function()
-		autoFarmScroll.Visible = false
-		botCtrlScroll.Visible = true
-		botCtrlTabBtn.BackgroundColor3 = Color3.fromRGB(35, 140, 80)
-		botCtrlTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		autoFarmTabBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
-		autoFarmTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	end)
+		autoFarmTabBtn.BackgroundColor3 = (activeBtn == autoFarmTabBtn) and Color3.fromRGB(35, 140, 80) or Color3.fromRGB(40, 40, 58)
+		statsTabBtn.BackgroundColor3 = (activeBtn == statsTabBtn) and Color3.fromRGB(35, 140, 80) or Color3.fromRGB(40, 40, 58)
+		settingsTabBtn.BackgroundColor3 = (activeBtn == settingsTabBtn) and Color3.fromRGB(35, 140, 80) or Color3.fromRGB(40, 40, 58)
+		botCtrlTabBtn.BackgroundColor3 = (activeBtn == botCtrlTabBtn) and Color3.fromRGB(35, 140, 80) or Color3.fromRGB(40, 40, 58)
+	end
+
+	autoFarmTabBtn.MouseButton1Click:Connect(function() switchTab(autoFarmTabBtn) end)
+	statsTabBtn.MouseButton1Click:Connect(function() switchTab(statsTabBtn) end)
+	settingsTabBtn.MouseButton1Click:Connect(function() switchTab(settingsTabBtn) end)
+	botCtrlTabBtn.MouseButton1Click:Connect(function() switchTab(botCtrlTabBtn) end)
 
 	minimizeBtn.MouseButton1Click:Connect(function()
 		isMinimized = not isMinimized
 		if isMinimized then
 			autoFarmScroll.Visible = false
+			statsScroll.Visible = false
+			settingsScroll.Visible = false
 			botCtrlScroll.Visible = false
 			tabContainer.Visible = false
 			mainFrame:TweenSize(UDim2.new(0, 240, 0, 32), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true)
 			minimizeBtn.Text = "+"
 		else
-			mainFrame:TweenSize(UDim2.new(0, 240, 0, 420), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
+			mainFrame:TweenSize(UDim2.new(0, 240, 0, 260), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.2, true, function()
 				tabContainer.Visible = true
 				if autoFarmTabBtn.BackgroundColor3 == Color3.fromRGB(35, 140, 80) then
 					autoFarmScroll.Visible = true
+				elseif statsTabBtn.BackgroundColor3 == Color3.fromRGB(35, 140, 80) then
+					statsScroll.Visible = true
+				elseif settingsTabBtn.BackgroundColor3 == Color3.fromRGB(35, 140, 80) then
+					settingsScroll.Visible = true
 				else
 					botCtrlScroll.Visible = true
 				end
@@ -717,14 +879,28 @@ task.spawn(function()
 		end
 	end
 
-	local function createButton(text, posY, initialState)
+	local function createHeaderLabel(parent, text, posY)
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, -6, 0, 18)
+		lbl.Position = UDim2.new(0, 3, 0, posY)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = text
+		lbl.TextColor3 = Color3.fromRGB(200, 200, 220)
+		lbl.TextSize = 10
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = parent
+		return lbl
+	end
+
+	local function createButton(parent, text, posY, initialState)
 		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1, 0, 0, 25)
-		btn.Position = UDim2.new(0, 0, 0, posY)
+		btn.Size = UDim2.new(1, -6, 0, 25)
+		btn.Position = UDim2.new(0, 3, 0, posY)
 		btn.TextSize = 10
 		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		btn.Font = Enum.Font.GothamSemibold
-		btn.Parent = autoFarmScroll
+		btn.Parent = parent
 		
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 		
@@ -737,170 +913,381 @@ task.spawn(function()
 		return btn
 	end
 
-	local farmerBtn = createButton("Auto Farm", 0, isFarmingActive)
-	local voteBtn = createButton("Auto Vote", 28, isAutoVoteActive)
-	local shootBtn = createButton("Shoot Murderer", 56, isShootMurdererActive)
-	local killBtn = createButton("Auto Kill All", 84, isAutoKillAllActive)
-	local fpsBtn = createButton("FPS Booster", 112, isFpsBoosterActive)
-	local showCoinsBtn = createButton("Show Coins", 140, isShowCoinsActive)
-	local optimizedCoinsBtn = createButton("Optimized Coins", 168, isOptimizedCoinsActive)
-	local rejoinBtn = createButton("Auto Rejoin", 196, isAutoRejoinActive)
+	local function createStatBox(parent, posY, text, textColor)
+		local box = Instance.new("Frame")
+		box.Size = UDim2.new(1, -6, 0, 26)
+		box.Position = UDim2.new(0, 3, 0, posY)
+		box.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+		box.BorderSizePixel = 0
+		box.Parent = parent
+		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
 
-	local function createInput(labelText, defaultVal, posY, settingKey)
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, -8, 1, 0)
+		lbl.Position = UDim2.new(0, 4, 0, 0)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = text
+		lbl.TextColor3 = textColor
+		lbl.TextSize = 9
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = box
+		return lbl
+	end
+
+	-- ==================== AUTO FARM SECTION ====================
+	createHeaderLabel(autoFarmScroll, "AUTO FARM:", 0)
+
+	local farmerBtn = createButton(autoFarmScroll, "Auto Farm Coins", 22, isFarmingActive)
+	local voteBtn = createButton(autoFarmScroll, "Auto Vote Smallest Maps", 50, isAutoVoteActive)
+
+	-- ==================== SLIDERS & DROPDOWN ====================
+	local activeSlider = nil
+
+	local function createSliderWithInput(labelText, minVal, maxVal, defaultVal, posY, settingKey)
+		local containerFrame = Instance.new("Frame")
+		containerFrame.Name = settingKey .. "Container"
+		containerFrame.Size = UDim2.new(1, -6, 0, 34)
+		containerFrame.Position = UDim2.new(0, 3, 0, posY)
+		containerFrame.BackgroundTransparency = 1
+		containerFrame.Parent = autoFarmScroll
+
 		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(0, 105, 0, 24)
-		label.Position = UDim2.new(0, 0, 0, posY)
+		label.Size = UDim2.new(1, -65, 0, 14)
+		label.Position = UDim2.new(0, 2, 0, 0)
 		label.BackgroundTransparency = 1
 		label.Text = labelText
 		label.TextColor3 = Color3.fromRGB(170, 170, 190)
 		label.TextSize = 10
 		label.Font = Enum.Font.GothamMedium
 		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.Parent = autoFarmScroll
+		label.Parent = containerFrame
 
-		local box = Instance.new("TextBox")
-		box.Size = UDim2.new(0, 95, 0, 24)
-		box.Position = UDim2.new(1, -95, 0, posY)
-		box.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
-		box.TextColor3 = Color3.fromRGB(255, 255, 255)
-		box.Text = tostring(defaultVal)
-		box.TextSize = 10
-		box.Font = Enum.Font.Gotham
-		box.Parent = autoFarmScroll
-		
-		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
-		
-		local stroke = Instance.new("UIStroke")
-		stroke.Color = Color3.fromRGB(55, 55, 80)
-		stroke.Thickness = 1
-		stroke.Parent = box
-		
-		box:GetPropertyChangedSignal("Text"):Connect(function()
-			local val = tonumber(box.Text)
-			if val then
-				settingsData[settingKey] = val
-				saveSettings()
+		local inputValBox = Instance.new("TextBox")
+		inputValBox.Size = UDim2.new(0, 52, 0, 20)
+		inputValBox.Position = UDim2.new(1, -52, 0, 0)
+		inputValBox.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+		inputValBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+		inputValBox.Text = tostring(defaultVal)
+		inputValBox.TextSize = 10
+		inputValBox.Font = Enum.Font.GothamBold
+		inputValBox.Parent = containerFrame
+		Instance.new("UICorner", inputValBox).CornerRadius = UDim.new(0, 4)
+
+		local inputStroke = Instance.new("UIStroke")
+		inputStroke.Color = Color3.fromRGB(60, 60, 85)
+		inputStroke.Thickness = 1
+		inputStroke.Parent = inputValBox
+
+		local sliderBg = Instance.new("Frame")
+		sliderBg.Size = UDim2.new(1, -60, 0, 6)
+		sliderBg.Position = UDim2.new(0, 2, 0, 22)
+		sliderBg.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+		sliderBg.BorderSizePixel = 0
+		sliderBg.ClipsDescendants = false
+		sliderBg.Parent = containerFrame
+		Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(0, 3)
+
+		local sliderFill = Instance.new("Frame")
+		local initPercent = math.clamp((defaultVal - minVal) / (maxVal - minVal), 0, 1)
+		sliderFill.Size = UDim2.new(initPercent, 0, 1, 0)
+		sliderFill.BackgroundColor3 = Color3.fromRGB(35, 140, 80)
+		sliderFill.BorderSizePixel = 0
+		sliderFill.Parent = sliderBg
+		Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(0, 3)
+
+		local sliderThumb = Instance.new("Frame")
+		sliderThumb.Size = UDim2.new(0, 12, 0, 12)
+		sliderThumb.AnchorPoint = Vector2.new(0.5, 0.5)
+		sliderThumb.Position = UDim2.new(initPercent, 0, 0.5, 0)
+		sliderThumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		sliderThumb.BorderSizePixel = 0
+		sliderThumb.Parent = sliderBg
+		Instance.new("UICorner", sliderThumb).CornerRadius = UDim.new(1, 0)
+
+		local thumbStroke = Instance.new("UIStroke")
+		thumbStroke.Color = Color3.fromRGB(35, 140, 80)
+		thumbStroke.Thickness = 1.5
+		thumbStroke.Parent = sliderThumb
+
+		local function updateValue(val)
+			val = math.clamp(val, minVal, maxVal)
+			val = math.floor(val * 10 + 0.5) / 10
+
+			settingsData[settingKey] = val
+			saveSettings()
+
+			local percent = math.clamp((val - minVal) / (maxVal - minVal), 0, 1)
+			sliderFill.Size = UDim2.new(percent, 0, 1, 0)
+			sliderThumb.Position = UDim2.new(percent, 0, 0.5, 0)
+			inputValBox.Text = tostring(val)
+		end
+
+		local function handleInput(input)
+			local absPos = sliderBg.AbsolutePosition.X
+			local absSize = sliderBg.AbsoluteSize.X
+			local percent = math.clamp((input.Position.X - absPos) / absSize, 0, 1)
+			local val = minVal + (maxVal - minVal) * percent
+			updateValue(val)
+		end
+
+		sliderBg.InputBegan:Connect(function(input)
+			if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not activeSlider then
+				activeSlider = sliderBg
+				handleInput(input)
 			end
 		end)
-		
-		box.FocusLost:Connect(function()
-			local val = tonumber(box.Text)
-			if not val then
-				box.Text = tostring(settingsData[settingKey])
+
+		sliderThumb.InputBegan:Connect(function(input)
+			if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not activeSlider then
+				activeSlider = sliderBg
+				handleInput(input)
 			end
 		end)
-		
-		return box
+
+		UserInputService.InputEnded:Connect(function(input)
+			if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and activeSlider == sliderBg then
+				activeSlider = nil
+			end
+		end)
+
+		UserInputService.InputChanged:Connect(function(input)
+			if activeSlider == sliderBg and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+				handleInput(input)
+			end
+		end)
+
+		inputValBox.FocusLost:Connect(function()
+			local num = tonumber(inputValBox.Text)
+			if num then
+				updateValue(num)
+			else
+				inputValBox.Text = tostring(settingsData[settingKey])
+			end
+		end)
 	end
 
-	speedInput = createInput("Speed", settingsData.Speed, 226, "Speed")
-	heightInput = createInput("Height Offset", settingsData.HeightOffset, 254, "HeightOffset")
-	radiusInput = createInput("Aura Radius", settingsData.AuraRadius, 282, "AuraRadius")
+	createSliderWithInput("Farm Speed", 10, 150, settingsData.Speed, 78, "Speed")
+	createSliderWithInput("Farm Height Offset", -6, 6, settingsData.HeightOffset, 116, "HeightOffset")
 
-	-- Status Box
-	local statusBox = Instance.new("Frame")
-	statusBox.Size = UDim2.new(1, 0, 0, 26)
-	statusBox.Position = UDim2.new(0, 0, 0, 312)
-	statusBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
-	statusBox.BorderSizePixel = 0
-	statusBox.Parent = autoFarmScroll
+	-- Dropdown for Farm Type
+	local dropdownContainer = Instance.new("Frame")
+	dropdownContainer.Size = UDim2.new(1, -6, 0, 50)
+	dropdownContainer.Position = UDim2.new(0, 3, 0, 154)
+	dropdownContainer.BackgroundTransparency = 1
+	dropdownContainer.Parent = autoFarmScroll
 
-	Instance.new("UICorner", statusBox).CornerRadius = UDim.new(0, 4)
+	local dropdownLabel = Instance.new("TextLabel")
+	dropdownLabel.Size = UDim2.new(1, 0, 0, 14)
+	dropdownLabel.Position = UDim2.new(0, 2, 0, 0)
+	dropdownLabel.BackgroundTransparency = 1
+	dropdownLabel.Text = "Farm Type"
+	dropdownLabel.TextColor3 = Color3.fromRGB(170, 170, 190)
+	dropdownLabel.TextSize = 10
+	dropdownLabel.Font = Enum.Font.GothamMedium
+	dropdownLabel.TextXAlignment = Enum.TextXAlignment.Left
+	dropdownLabel.Parent = dropdownContainer
 
-	statusLabel = Instance.new("TextLabel")
-	statusLabel.Size = UDim2.new(1, -8, 1, 0)
-	statusLabel.Position = UDim2.new(0, 4, 0, 0)
-	statusLabel.BackgroundTransparency = 1
-	statusLabel.Text = "Status: Idle / Ready"
-	statusLabel.TextColor3 = Color3.fromRGB(0, 255, 170)
-	statusLabel.TextSize = 9
-	statusLabel.Font = Enum.Font.GothamMedium
-	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-	statusLabel.Parent = statusBox
+	local dropdownBtn = Instance.new("TextButton")
+	dropdownBtn.Size = UDim2.new(1, 0, 0, 26)
+	dropdownBtn.Position = UDim2.new(0, 0, 0, 18)
+	dropdownBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+	dropdownBtn.Text = "  " .. currentFarmType .. " ▼"
+	dropdownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	dropdownBtn.TextSize = 10
+	dropdownBtn.Font = Enum.Font.GothamBold
+	dropdownBtn.TextXAlignment = Enum.TextXAlignment.Left
+	dropdownBtn.Parent = dropdownContainer
+	Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0, 4)
 
-	-- Coins Per Hour Box
-	local cphBox = Instance.new("Frame")
-	cphBox.Size = UDim2.new(1, 0, 0, 26)
-	cphBox.Position = UDim2.new(0, 0, 0, 342)
-	cphBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
-	cphBox.BorderSizePixel = 0
-	cphBox.Parent = autoFarmScroll
+	local dropdownStroke = Instance.new("UIStroke")
+	dropdownStroke.Color = Color3.fromRGB(60, 60, 85)
+	dropdownStroke.Thickness = 1
+	dropdownStroke.Parent = dropdownBtn
 
-	Instance.new("UICorner", cphBox).CornerRadius = UDim.new(0, 4)
+	local dropdownList = Instance.new("Frame")
+	dropdownList.Size = UDim2.new(1, 0, 0, 84)
+	dropdownList.Position = UDim2.new(0, 0, 0, 46)
+	dropdownList.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+	dropdownList.BorderSizePixel = 0
+	dropdownList.Visible = false
+	dropdownList.ZIndex = 5
+	dropdownList.Parent = dropdownContainer
+	Instance.new("UICorner", dropdownList).CornerRadius = UDim.new(0, 4)
 
-	cphLabel = Instance.new("TextLabel")
-	cphLabel.Size = UDim2.new(1, -8, 1, 0)
-	cphLabel.Position = UDim2.new(0, 4, 0, 0)
-	cphLabel.BackgroundTransparency = 1
-	cphLabel.Text = "Coins/Hr: 0"
-	cphLabel.TextColor3 = Color3.fromRGB(80, 200, 255)
-	cphLabel.TextSize = 9
-	cphLabel.Font = Enum.Font.GothamBold
-	cphLabel.TextXAlignment = Enum.TextXAlignment.Left
-	cphLabel.Parent = cphBox
+	local options = { 
+		{ name = "Lay on back", asset = "rbxassetid://114004305653669" }, 
+		{ name = "Standing", asset = "rbxassetid://126191781850259" } 
+	}
+	
+	for i, opt in ipairs(options) do
+		local yPos = (i - 1) * 36 + 6
+		local optBtn = Instance.new("TextButton")
+		optBtn.Size = UDim2.new(1, -8, 0, 28)
+		optBtn.Position = UDim2.new(0, 4, 0, yPos)
+		optBtn.BackgroundTransparency = 1
+		optBtn.Text = "            " .. opt.name
+		optBtn.TextColor3 = Color3.fromRGB(220, 220, 240)
+		optBtn.TextSize = 10
+		optBtn.Font = Enum.Font.GothamMedium
+		optBtn.TextXAlignment = Enum.TextXAlignment.Left
+		optBtn.ZIndex = 6
+		optBtn.Parent = dropdownList
 
-	-- Session Coins Box
-	local sessionCoinsBox = Instance.new("Frame")
-	sessionCoinsBox.Size = UDim2.new(1, 0, 0, 26)
-	sessionCoinsBox.Position = UDim2.new(0, 0, 0, 372)
-	sessionCoinsBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
-	sessionCoinsBox.BorderSizePixel = 0
-	sessionCoinsBox.Parent = autoFarmScroll
+		local iconBg = Instance.new("Frame")
+		iconBg.Size = UDim2.new(0, 22, 0, 22)
+		iconBg.Position = UDim2.new(0, 4, 0.5, -11)
+		iconBg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		iconBg.BorderSizePixel = 0
+		iconBg.ZIndex = 7
+		iconBg.Parent = optBtn
+		Instance.new("UICorner", iconBg).CornerRadius = UDim.new(0, 4)
 
-	Instance.new("UICorner", sessionCoinsBox).CornerRadius = UDim.new(0, 4)
+		local optIcon = Instance.new("ImageLabel")
+		optIcon.Size = UDim2.new(1, -2, 1, -2)
+		optIcon.Position = UDim2.new(0, 1, 0, 1)
+		optIcon.BackgroundTransparency = 1
+		optIcon.Image = opt.asset
+		optIcon.ZIndex = 8
+		optIcon.Parent = iconBg
 
-	sessionCoinsLabel = Instance.new("TextLabel")
-	sessionCoinsLabel.Size = UDim2.new(1, -8, 1, 0)
-	sessionCoinsLabel.Position = UDim2.new(0, 4, 0, 0)
-	sessionCoinsLabel.BackgroundTransparency = 1
-	sessionCoinsLabel.Text = "Session Coins: 0"
-	sessionCoinsLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-	sessionCoinsLabel.TextSize = 9
-	sessionCoinsLabel.Font = Enum.Font.GothamBold
-	sessionCoinsLabel.TextXAlignment = Enum.TextXAlignment.Left
-	sessionCoinsLabel.Parent = sessionCoinsBox
+		optBtn.MouseButton1Click:Connect(function()
+			currentFarmType = opt.name
+			settingsData.FarmType = currentFarmType
+			saveSettings()
+			dropdownBtn.Text = "  " .. currentFarmType .. " ▼"
+			dropdownList.Visible = false
+		end)
+	end
 
-	-- Server Time Elapsed Box
-	local serverTimerBox = Instance.new("Frame")
-	serverTimerBox.Size = UDim2.new(1, 0, 0, 26)
-	serverTimerBox.Position = UDim2.new(0, 0, 0, 402)
-	serverTimerBox.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
-	serverTimerBox.BorderSizePixel = 0
-	serverTimerBox.Parent = autoFarmScroll
+	dropdownBtn.MouseButton1Click:Connect(function()
+		dropdownList.Visible = not dropdownList.Visible
+	end)
 
-	Instance.new("UICorner", serverTimerBox).CornerRadius = UDim.new(0, 4)
+	local coinAuraToggleBtn = createButton(autoFarmScroll, "Coin Aura", 212, isCoinAuraActive)
+	local avoidBtn = createButton(autoFarmScroll, "Avoid Murderer", 240, isAvoidMurdererActive)
+	local grabGunBtn = createButton(autoFarmScroll, "Auto Grab Gun", 268, isAutoGrabGunActive)
+	local flingBtn = createButton(autoFarmScroll, "Auto Fling Murderer", 296, isAutoFlingMurdererActive)
+	local innocentRoleLabel = Instance.new("TextLabel")
+	innocentRoleLabel.Size = UDim2.new(0, 65, 1, 0)
+	innocentRoleLabel.Position = UDim2.new(1, -69, 0, 0)
+	innocentRoleLabel.BackgroundTransparency = 1
+	innocentRoleLabel.Text = "[ Innocent ]"
+	innocentRoleLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+	innocentRoleLabel.TextSize = 9
+	innocentRoleLabel.Font = Enum.Font.GothamBold
+	innocentRoleLabel.TextXAlignment = Enum.TextXAlignment.Right
+	innocentRoleLabel.Parent = flingBtn
+	local innocentStroke = Instance.new("UIStroke")
+	innocentStroke.Color = Color3.fromRGB(0, 0, 0)
+	innocentStroke.Thickness = 1.5
+	innocentStroke.Parent = innocentRoleLabel
 
-	serverTimerLabel = Instance.new("TextLabel")
-	serverTimerLabel.Size = UDim2.new(1, -8, 1, 0)
-	serverTimerLabel.Position = UDim2.new(0, 4, 0, 0)
-	serverTimerLabel.BackgroundTransparency = 1
-	serverTimerLabel.Text = "Server Time: 0s"
-	serverTimerLabel.TextColor3 = Color3.fromRGB(200, 180, 255)
-	serverTimerLabel.TextSize = 9
-	serverTimerLabel.Font = Enum.Font.GothamBold
-	serverTimerLabel.TextXAlignment = Enum.TextXAlignment.Left
-	serverTimerLabel.Parent = serverTimerBox
+	local shootBtn = createButton(autoFarmScroll, "Auto Shoot Murderer", 324, isShootMurdererActive)
+	local sheriffRoleLabel = Instance.new("TextLabel")
+	sheriffRoleLabel.Size = UDim2.new(0, 60, 1, 0)
+	sheriffRoleLabel.Position = UDim2.new(1, -64, 0, 0)
+	sheriffRoleLabel.BackgroundTransparency = 1
+	sheriffRoleLabel.Text = "[ Sheriff ]"
+	sheriffRoleLabel.TextColor3 = Color3.fromRGB(0, 150, 255)
+	sheriffRoleLabel.TextSize = 9
+	sheriffRoleLabel.Font = Enum.Font.GothamBold
+	sheriffRoleLabel.TextXAlignment = Enum.TextXAlignment.Right
+	sheriffRoleLabel.Parent = shootBtn
+	local sheriffStroke = Instance.new("UIStroke")
+	sheriffStroke.Color = Color3.fromRGB(0, 0, 0)
+	sheriffStroke.Thickness = 1.5
+	sheriffStroke.Parent = sheriffRoleLabel
 
-	-- ==================== BOT CONTROLLER SECTION (Solid Black Outlines) ====================
+	local killBtn = createButton(autoFarmScroll, "Auto Kill All", 352, isAutoKillAllActive)
+	local murdRoleLabel = Instance.new("TextLabel")
+	murdRoleLabel.Size = UDim2.new(0, 65, 1, 0)
+	murdRoleLabel.Position = UDim2.new(1, -69, 0, 0)
+	murdRoleLabel.BackgroundTransparency = 1
+	murdRoleLabel.Text = "[ Murderer ]"
+	murdRoleLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+	murdRoleLabel.TextSize = 9
+	murdRoleLabel.Font = Enum.Font.GothamBold
+	murdRoleLabel.TextXAlignment = Enum.TextXAlignment.Right
+	murdRoleLabel.Parent = killBtn
+	local murdStroke = Instance.new("UIStroke")
+	murdStroke.Color = Color3.fromRGB(0, 0, 0)
+	murdStroke.Thickness = 1.5
+	murdStroke.Parent = murdRoleLabel
+
+	-- ==================== CUSTOMIZATIONS SECTION ====================
+	createHeaderLabel(autoFarmScroll, "CUSTOMIZATIONS:", 388)
+	local showCoinsBtn = createButton(autoFarmScroll, "Show Coins", 410, isShowCoinsActive)
+	local optimizedCoinsBtn = createButton(autoFarmScroll, "Optimize Coins", 438, isOptimizedCoinsActive)
+	local fpsBtn = createButton(autoFarmScroll, "FPS Boost", 466, isFpsBoosterActive)
+	local showCoinBoxBtn = createButton(autoFarmScroll, "Show Coin Aura Box", 494, isShowCoinAuraBoxActive)
+
+	-- ==================== SETTINGS TAB CONTENTS ====================
+	createHeaderLabel(settingsScroll, "SETTINGS:", 0)
+	local antiFlingBtn = createButton(settingsScroll, "Anti Fling", 25, isAntiFlingActive)
+	local antiAFKBtn = createButton(settingsScroll, "Anti AFK", 55, isAntiAFKActive)
+	local antiVoidBtn = createButton(settingsScroll, "Anti Void", 85, isAntiVoidActive)
+	local rejoinBtn = createButton(settingsScroll, "Auto Rejoin", 115, isAutoRejoinActive)
+
+	antiFlingBtn.MouseButton1Click:Connect(function()
+		isAntiFlingActive = not isAntiFlingActive
+		settingsData.AntiFling = isAntiFlingActive
+		saveSettings()
+		updateToggleVisual(antiFlingBtn, isAntiFlingActive, "Anti Fling")
+	end)
+
+	antiAFKBtn.MouseButton1Click:Connect(function()
+		isAntiAFKActive = not isAntiAFKActive
+		settingsData.AntiAFK = isAntiAFKActive
+		saveSettings()
+		updateToggleVisual(antiAFKBtn, isAntiAFKActive, "Anti AFK")
+	end)
+
+	antiVoidBtn.MouseButton1Click:Connect(function()
+		isAntiVoidActive = not isAntiVoidActive
+		settingsData.AntiVoid = isAntiVoidActive
+		saveSettings()
+		updateToggleVisual(antiVoidBtn, isAntiVoidActive, "Anti Void")
+		applyAntiVoid(isAntiVoidActive)
+	end)
+
+	rejoinBtn.MouseButton1Click:Connect(function()
+		isAutoRejoinActive = not isAutoRejoinActive
+		settingsData.AutoRejoin = isAutoRejoinActive
+		saveSettings()
+		updateToggleVisual(rejoinBtn, isAutoRejoinActive, "Auto Rejoin")
+	end)
+
+	-- ==================== STATS TAB CONTENTS ====================
+	createHeaderLabel(statsScroll, "STATISTICS:", 0)
+	statusLabel = createStatBox(statsScroll, 22, "Status: Idle / Ready", Color3.fromRGB(0, 255, 170))
+	sessionCoinsLabel = createStatBox(statsScroll, 52, "Session Coins: 0", Color3.fromRGB(255, 215, 0))
+	roundCoinsLabel = createStatBox(statsScroll, 82, "Round Coins: 0", Color3.fromRGB(255, 165, 0))
+	avgCphLabel = createStatBox(statsScroll, 112, "Average Coins/Hr: 0", Color3.fromRGB(80, 200, 255))
+	serverTimerLabel = createStatBox(statsScroll, 142, "Server Uptime: 0s", Color3.fromRGB(200, 180, 255))
+
+	-- ==================== BOTS CONTROL SECTION ====================
+	createHeaderLabel(botCtrlScroll, "BOTS CONTROL:", 0)
+
 	local function createBotButton(name, posY, buttonText, targetCFrame)
 		local btn = Instance.new("TextButton")
 		btn.Name = name
-		btn.Size = UDim2.new(1, 0, 0, 36)
-		btn.Position = UDim2.new(0, 0, 0, posY)
-		btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		btn.Size = UDim2.new(1, -6, 0, 25)
+		btn.Position = UDim2.new(0, 3, 0, posY)
+		btn.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
 		btn.Font = Enum.Font.GothamSemibold
 		btn.Text = buttonText
 		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		btn.TextSize = 12
+		btn.TextSize = 10
 		btn.Parent = botCtrlScroll
 
 		local btnCorner = Instance.new("UICorner")
-		btnCorner.CornerRadius = UDim.new(0, 6)
+		btnCorner.CornerRadius = UDim.new(0, 4)
 		btnCorner.Parent = btn
 
 		local btnStroke = Instance.new("UIStroke")
-		btnStroke.Color = Color3.fromRGB(0, 0, 0) -- Solid black outline as requested
-		btnStroke.Thickness = 1.5
+		btnStroke.Color = Color3.fromRGB(60, 60, 85)
+		btnStroke.Thickness = 1
 		btnStroke.Parent = btn
 
 		btn.MouseButton1Click:Connect(function()
@@ -915,7 +1302,6 @@ task.spawn(function()
 			hrp.Anchored = false
 			hrp.CFrame = targetCFrame
 
-			-- Stays there for 1 second smoothly
 			task.wait(1.0)
 
 			if currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart") then
@@ -927,8 +1313,8 @@ task.spawn(function()
 		return btn
 	end
 
-	createBotButton("ResetBotsBtn", 5, "Reset Bots", CFrame.new(391, 313, 383))
-	createBotButton("RejoinBotsBtn", 50, "Rejoin Bots", CFrame.new(291, 182, 282))
+	createBotButton("ResetBotsBtn", 25, "Reset Bots", CFrame.new(391, 313, 383))
+	createBotButton("RejoinBotsBtn", 55, "Rejoin Bots", CFrame.new(291, 182, 282))
 
 	if isFpsBoosterActive then
 		applyFpsBoost(true)
@@ -938,41 +1324,39 @@ task.spawn(function()
 		isFarmingActive = not isFarmingActive
 		settingsData.AutoFarm = isFarmingActive
 		saveSettings()
-		updateToggleVisual(farmerBtn, isFarmingActive, "Auto Farm")
+		updateToggleVisual(farmerBtn, isFarmingActive, "Auto Farm Coins")
 		
 		local character, rootPart, humanoid = LocalPlayer.Character, LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"), LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
 
 		if isFarmingActive then
-			farmStartTime = tick()
+			farmStartTime = nil
 			coinsCollectedSession = 0
 			coinsThisSpawn = 0
-			weaponTimer = 0
+			isBagFull = false
+			hasTeleportedToSafeZone = false
 			safeZoneTimer = 0
-			isResetting = false
 			isCurrentlyVoting = false
 			isScriptTeleporting = false
-			foundCoinsMidTimer = false
-			hasTriggeredWeaponTimer = false
 			trackedPickupCoins = {}
 			if rootPart then lastPosition = rootPart.Position end
-			if humanoid then humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false) end
+			if humanoid then
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+			end
 		else
-			statusLabel.Text = "Status: Idle / Ready"
+			if statusLabel then statusLabel.Text = "Status: Idle / Ready" end
 			visitedCoins = {}
 			isBagFull = false
 			hasTeleportedToSafeZone = false
 			coinsThisSpawn = 0
-			weaponTimer = 0
 			safeZoneTimer = 0
-			isResetting = false
 			isCurrentlyVoting = false
 			isScriptTeleporting = false
-			foundCoinsMidTimer = false
-			hasTriggeredWeaponTimer = false
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 			if rootPart then
 				rootPart.Anchored = false
 				if rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
+				if rootPart:FindFirstChild("TestRagdollVelocity") then rootPart.TestRagdollVelocity:Destroy() end
 			end
 			if character then
 				for _, part in ipairs(character:GetDescendants()) do
@@ -980,7 +1364,9 @@ task.spawn(function()
 				end
 			end
 			if humanoid then
+				humanoid.PlatformStand = false
 				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 			end
 		end
@@ -990,14 +1376,42 @@ task.spawn(function()
 		isAutoVoteActive = not isAutoVoteActive
 		settingsData.AutoVote = isAutoVoteActive
 		saveSettings()
-		updateToggleVisual(voteBtn, isAutoVoteActive, "Auto Vote")
+		updateToggleVisual(voteBtn, isAutoVoteActive, "Auto Vote Smallest Maps")
+	end)
+
+	coinAuraToggleBtn.MouseButton1Click:Connect(function()
+		isCoinAuraActive = not isCoinAuraActive
+		settingsData.CoinAura = isCoinAuraActive
+		saveSettings()
+		updateToggleVisual(coinAuraToggleBtn, isCoinAuraActive, "Coin Aura")
+	end)
+
+	avoidBtn.MouseButton1Click:Connect(function()
+		isAvoidMurdererActive = not isAvoidMurdererActive
+		settingsData.AvoidMurderer = isAvoidMurdererActive
+		saveSettings()
+		updateToggleVisual(avoidBtn, isAvoidMurdererActive, "Avoid Murderer")
+	end)
+
+	grabGunBtn.MouseButton1Click:Connect(function()
+		isAutoGrabGunActive = not isAutoGrabGunActive
+		settingsData.AutoGrabGun = isAutoGrabGunActive
+		saveSettings()
+		updateToggleVisual(grabGunBtn, isAutoGrabGunActive, "Auto Grab Gun")
+	end)
+
+	flingBtn.MouseButton1Click:Connect(function()
+		isAutoFlingMurdererActive = not isAutoFlingMurdererActive
+		settingsData.AutoFlingMurderer = isAutoFlingMurdererActive
+		saveSettings()
+		updateToggleVisual(flingBtn, isAutoFlingMurdererActive, "Auto Fling Murderer")
 	end)
 
 	shootBtn.MouseButton1Click:Connect(function()
 		isShootMurdererActive = not isShootMurdererActive
 		settingsData.ShootMurderer = isShootMurdererActive
 		saveSettings()
-		updateToggleVisual(shootBtn, isShootMurdererActive, "Shoot Murderer")
+		updateToggleVisual(shootBtn, isShootMurdererActive, "Auto Shoot Murderer")
 	end)
 
 	killBtn.MouseButton1Click:Connect(function()
@@ -1005,14 +1419,6 @@ task.spawn(function()
 		settingsData.AutoKillAll = isAutoKillAllActive
 		saveSettings()
 		updateToggleVisual(killBtn, isAutoKillAllActive, "Auto Kill All")
-	end)
-
-	fpsBtn.MouseButton1Click:Connect(function()
-		isFpsBoosterActive = not isFpsBoosterActive
-		settingsData.FpsBooster = isFpsBoosterActive
-		saveSettings()
-		updateToggleVisual(fpsBtn, isFpsBoosterActive, "FPS Booster")
-		applyFpsBoost(isFpsBoosterActive)
 	end)
 
 	showCoinsBtn.MouseButton1Click:Connect(function()
@@ -1032,26 +1438,50 @@ task.spawn(function()
 		isOptimizedCoinsActive = not isOptimizedCoinsActive
 		settingsData.OptimizedCoins = isOptimizedCoinsActive
 		saveSettings()
-		updateToggleVisual(optimizedCoinsBtn, isOptimizedCoinsActive, "Optimized Coins")
+		updateToggleVisual(optimizedCoinsBtn, isOptimizedCoinsActive, "Optimize Coins")
 	end)
 
-	rejoinBtn.MouseButton1Click:Connect(function()
-		isAutoRejoinActive = not isAutoRejoinActive
-		settingsData.AutoRejoin = isAutoRejoinActive
+	fpsBtn.MouseButton1Click:Connect(function()
+		isFpsBoosterActive = not isFpsBoosterActive
+		settingsData.FpsBooster = isFpsBoosterActive
 		saveSettings()
-		updateToggleVisual(rejoinBtn, isAutoRejoinActive, "Auto Rejoin")
+		updateToggleVisual(fpsBtn, isFpsBoosterActive, "FPS Boost")
+		applyFpsBoost(isFpsBoosterActive)
+	end)
+
+	showCoinBoxBtn.MouseButton1Click:Connect(function()
+		isShowCoinAuraBoxActive = not isShowCoinAuraBoxActive
+		settingsData.ShowCoinAuraBox = isShowCoinAuraBoxActive
+		saveSettings()
+		updateToggleVisual(showCoinBoxBtn, isShowCoinAuraBoxActive, "Show Coin Aura Box")
+		updateCoinAuraBox(isShowCoinAuraBoxActive)
 	end)
 end)
 
 --------------------------------------------------------
--- REALTIME FPS, PING & SERVER TIMER RENDERSTEPPED LOOP
+-- REALTIME FPS, PING & STATS UPDATE LOOP
 --------------------------------------------------------
 RunService.RenderStepped:Connect(function(dt)
 	frameCount = frameCount + 1
 	
+	local serverElapsed = tick() - serverJoinTime
 	if serverTimerLabel then
-		local serverElapsed = tick() - serverJoinTime
-		serverTimerLabel.Text = "Server Time: " .. formatDuration(serverElapsed)
+		serverTimerLabel.Text = "Server Uptime: " .. formatDuration(serverElapsed)
+	end
+
+	if sessionCoinsLabel and roundCoinsLabel then
+		roundCoinsLabel.Text = string.format("Round Coins: %d", coinsThisSpawn)
+		if farmStartTime then
+			local elapsed = tick() - farmStartTime
+			if elapsed > 0 then
+				local coinsPerHour = math.floor((coinsCollectedSession / elapsed) * 3600)
+				sessionCoinsLabel.Text = string.format("Session Coins: %d", coinsCollectedSession)
+				if avgCphLabel then avgCphLabel.Text = string.format("Average Coins/Hr: %d", coinsPerHour) end
+			end
+		else
+			sessionCoinsLabel.Text = string.format("Session Coins: %d", coinsCollectedSession)
+			if avgCphLabel then avgCphLabel.Text = "Average Coins/Hr: 0" end
+		end
 	end
 
 	if tick() - lastFpsUpdate >= 1 then
@@ -1071,14 +1501,13 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 
 		if headerPingLabel then
-			local pingVal = 0
 			pcall(function()
-				pingVal = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+				currentPingVal = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
 			end)
-			headerPingLabel.Text = pingVal .. "ms"
-			if pingVal <= 150 then
+			headerPingLabel.Text = currentPingVal .. "ms"
+			if currentPingVal <= 150 then
 				headerPingLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
-			elseif pingVal <= 199 then
+			elseif currentPingVal <= 199 then
 				headerPingLabel.TextColor3 = Color3.fromRGB(255, 140, 0)
 			else
 				headerPingLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
@@ -1086,7 +1515,17 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 
-	-- Force CoinVisual Y-Rotation to 0 across any map's CoinContainer when Optimized Coins is ON
+	-- Update coin aura visual box position
+	if coinAuraBoxPart and coinAuraBoxPart.Parent then
+		pcall(function()
+			local char = LocalPlayer.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				coinAuraBoxPart.CFrame = hrp.CFrame
+			end
+		end)
+	end
+
 	if isOptimizedCoinsActive then
 		pcall(function()
 			for _, map in ipairs(Workspace:GetChildren()) do
@@ -1118,8 +1557,103 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 --------------------------------------------------------
--- HELPER COMBAT METHODS
+-- ADVANCED PREDICTIVE SHOOTING & TARGETING
 --------------------------------------------------------
+local motionPart, motionPosition, motionTime
+local measuredVelocity = Vector3.zero
+
+local function sampleMotion(part)
+	local now = os.clock()
+	if motionPart == part and motionPosition and motionTime then
+		local delta = now - motionTime
+		if delta >= 0.008 and delta <= 0.5 then
+			local sampled = (part.Position - motionPosition) / delta
+			if sampled.Magnitude < 300 then
+				measuredVelocity = measuredVelocity:Lerp(sampled, 0.4)
+			end
+		end
+	else
+		measuredVelocity = part.AssemblyLinearVelocity
+	end
+	motionPart = part
+	motionPosition = part.Position
+	motionTime = now
+end
+
+local function calculateTravelAim(part, currentPing, currentFps)
+	sampleMotion(part)
+	local assembly = part.AssemblyLinearVelocity
+	
+	if assembly.Magnitude > 32 then
+		assembly = assembly.Unit * 32
+	end
+	
+	local velocity = assembly:Lerp(measuredVelocity, 0.35)
+	
+	local lead = (currentPing * 0.95) + (1 / math.max(currentFps, 30)) * 0.45
+	lead = math.clamp(lead, 0.02, 0.12)
+	
+	local predictedVelocity = Vector3.new(velocity.X, velocity.Y * 0.4, velocity.Z)
+	return part.Position + (predictedVelocity * lead)
+end
+
+local function findGunRemote()
+	local character = LocalPlayer.Character
+	local gun = character and character:FindFirstChild("Gun")
+	if not gun then
+		local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+		gun = backpack and backpack:FindFirstChild("Gun")
+	end
+	if gun then
+		for _, obj in ipairs(gun:GetDescendants()) do
+			if obj:IsA("RemoteEvent") then return obj end
+		end
+	end
+	local cs = ReplicatedStorage:FindFirstChild("ClientServices")
+	local ws = cs and cs:FindFirstChild("WeaponService")
+	local gf = ws and ws:FindFirstChild("GunFired")
+	if gf and gf:IsA("RemoteEvent") then return gf end
+	return nil
+end
+
+local function shootMurdererInstantly(targetPart, currentPing, currentFps)
+	local success = false
+
+	pcall(function()
+		local camera = Workspace.CurrentCamera
+		local character = LocalPlayer.Character
+		local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+
+		if not targetPart or not camera or not character or not humanoid or not rootPart then return end
+
+		rootPart.Anchored = false
+		local murdererCF = targetPart.CFrame
+		rootPart.CFrame = murdererCF * CFrame.new(0, 0, 4) * CFrame.Angles(0, math.rad(180), 0)
+
+		local gun = character:FindFirstChild("Gun")
+		if not gun and backpack then
+			gun = backpack:FindFirstChild("Gun")
+			if gun then
+				humanoid:EquipTool(gun)
+				task.wait(0.03)
+			end
+		end
+
+		local remote = findGunRemote()
+		if not remote then return end
+
+		local aim = calculateTravelAim(targetPart, currentPing, currentFps)
+		local origin = camera.CFrame.Position
+
+		remote:FireServer(CFrame.lookAt(origin, aim), CFrame.new(aim))
+		success = true
+	end)
+
+	return success
+end
+
 local function getCharacterParts()
 	local character = LocalPlayer.Character
 	if not character then return nil, nil, nil end
@@ -1158,42 +1692,19 @@ local function updateTargetAnchor(cframe)
 	return currentTargetAnchor.Position
 end
 
-local function getMurd()
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LocalPlayer then
-			local bp = plr:FindFirstChild("Backpack")
-			local char = plr.Character
-			if (bp and bp:FindFirstChild("Knife")) or (char and char:FindFirstChild("Knife")) then
-				return plr
-			end
-		end
-	end
-	return nil
-end
-
-local function autoClick()
-	pcall(function()
-		local pos = Camera.ViewportSize / 2
-		VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 0)
-		VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 0)
-	end)
-end
-
 local function shootMurd()
-	local gun = getGun()
-	if not gun then return end
-	if not equipGun() then return end
-	
 	local murd = getMurd()
-	if murd and murd.Character and murd.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-		local hrp = LocalPlayer.Character.HumanoidRootPart
-		local mHrp = murd.Character.HumanoidRootPart
-		hrp.Anchored = false
-		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(mHrp.Position.X, mHrp.Position.Y, mHrp.Position.Z))
-		lastPosition = hrp.Position
-		
-		task.wait(0.05)
-		autoClick()
+	while murd and murd.Character and isShootMurdererActive do
+		local hum = murd.Character:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health <= 0 then break end
+		local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
+		if hrp then
+			shootMurdererInstantly(hrp, currentPingVal, currentFps)
+		else
+			break
+		end
+		task.wait(0.1)
+		murd = getMurd()
 	end
 end
 
@@ -1214,6 +1725,137 @@ local function killAll()
 	end
 	for _, upperTorso in ipairs(targets) do
 		handleTouched:FireServer(upperTorso)
+	end
+end
+
+-- Helper functions for resetPlayer (Fling)
+local function isWhitelisted(player)
+	return false
+end
+
+local function setRootReference(root, targetRoot)
+end
+
+local function clearRootReference(root)
+end
+
+local function fullyRestoreCharacter(character, savedData)
+	pcall(function()
+		local hum = character:FindFirstChildOfClass("Humanoid")
+		local hrp = character:FindFirstChild("HumanoidRootPart")
+		if hum then hum.PlatformStand = false end
+		if hrp and savedData and savedData.cframe then
+			hrp.CFrame = savedData.cframe
+		end
+	end)
+end
+
+local function resetPlayer(TargetPlayer)
+    if not TargetPlayer then return false end
+    if tick() - lastResetAttempt < RESET_COORDINATE_COOLDOWN then return false end
+    if isWhitelisted(TargetPlayer) then return false end
+    if TargetPlayer == LocalPlayer then return false end
+    
+    lastResetAttempt = tick()
+    
+    local Character = LocalPlayer.Character
+    if not Character then return false end
+    
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Humanoid and Humanoid.RootPart
+    local TCharacter = TargetPlayer.Character
+    
+    if not (Character and Humanoid and RootPart and TCharacter) then return false end
+    
+    local TRootPart = TCharacter:FindFirstChild("HumanoidRootPart")
+    local THead = TCharacter:FindFirstChild("Head")
+    if not TRootPart then return false end
+    
+    local savedData = { cframe = RootPart.CFrame }
+    Humanoid.PlatformStand = true
+    
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bv.Velocity = Vector3.new(0, -50000, 0)
+    bv.Parent = RootPart
+    
+    local bg = Instance.new("BodyGyro")
+    bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bg.P = 1000000
+    bg.Parent = RootPart
+    
+    local previousDestroyHeight = Workspace.FallenPartsDestroyHeight
+    Workspace.FallenPartsDestroyHeight = 0/0
+    
+    local startTime = tick()
+    local resetDuration = tonumber(customResetDuration) or 1
+    if resetDuration <= 0 then resetDuration = 0.1 end
+    
+    local startStuds = tonumber(resetStartStuds)
+    if not startStuds then startStuds = 5 end
+    
+    local completed = false
+    local conn
+    
+    conn = RunService.Heartbeat:Connect(function()
+        if tick() - startTime > resetDuration or not TargetPlayer.Character or not TRootPart.Parent then
+            Workspace.FallenPartsDestroyHeight = previousDestroyHeight
+            if bv.Parent then bv:Destroy() end
+            if bg.Parent then bg:Destroy() end
+            clearRootReference(RootPart)
+            fullyRestoreCharacter(Character, savedData)
+            if conn then conn:Disconnect() end
+            completed = true
+            return
+        end
+        
+        if TRootPart and TRootPart.Parent and Character and Character.Parent then
+            local targetPos = THead and THead.Position or (TRootPart.Position + Vector3.new(0, startStuds, 0))
+            RootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.pi / 2, 0, 0)
+            RootPart.AssemblyLinearVelocity = Vector3.new(0, -50000, 0)
+            RootPart.AssemblyAngularVelocity = Vector3.new(7500, 7500, 7500)
+            
+            for i = 1, 5 do
+                touch(RootPart, TRootPart)
+                if THead then
+                    touch(RootPart, THead)
+                end
+            end
+            
+            setRootReference(RootPart, TRootPart)
+        end
+    end)
+    
+    while not completed and TargetPlayer.Parent and isAutoFlingMurdererActive do
+        task.wait(0.05)
+    end
+    
+    if not completed then
+        Workspace.FallenPartsDestroyHeight = previousDestroyHeight
+        if bv.Parent then bv:Destroy() end
+        if bg.Parent then bg:Destroy() end
+        clearRootReference(RootPart)
+        fullyRestoreCharacter(Character, savedData)
+        if conn then conn:Disconnect() end
+    end
+    
+    return true
+end
+
+local function flingMurd()
+	while isAutoFlingMurdererActive do
+		local murd = getMurd()
+		if murd and murd.Character then
+			local hum = murd.Character:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				resetPlayer(murd)
+			else
+				break
+			end
+		else
+			break
+		end
+		task.wait(0.1)
 	end
 end
 
@@ -1321,23 +1963,34 @@ end)
 --------------------------------------------------------
 RunService.Heartbeat:Connect(function(dt)
 	local character, rootPart, humanoid = getCharacterParts()
-	
-	if cphLabel then
-		local elapsed = tick() - farmStartTime
-		if elapsed > 2 then
-			local coinsPerHour = math.floor((coinsCollectedSession / elapsed) * 3600)
-			cphLabel.Text = string.format("Coins/Hr: %d (%d/50)", coinsPerHour, coinsThisSpawn)
-		end
-	end
 
-	if sessionCoinsLabel then
-		sessionCoinsLabel.Text = string.format("Session Coins: %d", coinsCollectedSession)
+	-- ==================== AUTO GRAB GUN HANDLER (GUN TELEPORTS TO TORSO) ====================
+	if isAutoGrabGunActive and not hasGun() and not hasKnife() and rootPart then
+		pcall(function()
+			for _, map in ipairs(Workspace:GetChildren()) do
+				local gunDrop = map:FindFirstChild("GunDrop", true)
+				if gunDrop then
+					local targetPart = nil
+					if gunDrop:IsA("BasePart") then
+						targetPart = gunDrop
+					elseif gunDrop:IsA("Model") then
+						targetPart = gunDrop.PrimaryPart or gunDrop:FindFirstChildWhichIsA("BasePart", true)
+					end
+					
+					if targetPart then
+						targetPart.CFrame = rootPart.CFrame
+						break
+					end
+				end
+			end
+		end)
 	end
 
 	local containers = getCoinContainers()
 	local allDescendants = {}
 	for _, container in ipairs(containers) do
-		for _, desc in ipairs(container:GetDescendants()) do
+		local coinFolder = container:FindFirstChild("CoinFolder") or container
+		for _, desc in ipairs(coinFolder:GetDescendants()) do
 			if isTargetCoin(desc) then table.insert(allDescendants, desc) end
 		end
 	end
@@ -1388,7 +2041,7 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if character and rootPart and isFarmingActive and not isBagFull then
-		local radius = (radiusInput and tonumber(radiusInput.Text)) or settingsData.AuraRadius
+		local radius = isCoinAuraActive and 1000 or 15
 		local rootPos = rootPart.Position
 		local coinParts = getCoinParts(containers)
 		
@@ -1396,22 +2049,37 @@ RunService.Heartbeat:Connect(function(dt)
 			if not info.picked then
 				if isCoinFading(coinObj) or not coinObj.Parent then
 					info.picked = true
+					
+					if not farmStartTime then
+						farmStartTime = tick()
+					end
+
 					coinsCollectedSession = coinsCollectedSession + 1
 					coinsThisSpawn = coinsThisSpawn + 1
 					
-					if coinsThisSpawn >= BAG_MAX_COINS then
-						isBagFull = true
-					end
+					pcall(function()
+						local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+						local gameplay = remotes and remotes:FindFirstChild("gameplay")
+						local coinCollected = gameplay and gameplay:FindFirstChild("CoinCollected")
+						if coinCollected then
+							coinCollected:FireServer("Candy", 0, 50, "table: 0xbe3383760cf18974")
+						end
+					end)
 				end
 			end
 		end
 
 		for _, part in ipairs(coinParts) do
-			local dist = (rootPos - part.Position).Magnitude
-			if dist <= radius then
-				touch(rootPart, part)
-				if dist <= 3.5 and not trackedPickupCoins[part] then
-					trackedPickupCoins[part] = { touchedAt = tick(), picked = false }
+			local cf = getExactCoinCFrame(part)
+			if cf then
+				local heightOffset = settingsData.HeightOffset
+				local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
+				local dist = (rootPos - targetPosWithOffset).Magnitude
+				if dist <= radius then
+					touch(rootPart, part)
+					if dist <= 3.5 and not trackedPickupCoins[part] then
+						trackedPickupCoins[part] = { touchedAt = tick(), picked = false }
+					end
 				end
 			end
 		end
@@ -1436,21 +2104,20 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	local unvisitedCount = 0
+	local activeCoinCount = 0
 	for _, part in ipairs(allDescendants) do
-		if not isCoinFading(part) and not visitedCoins[part] then unvisitedCount = unvisitedCount + 1 end
-	end
-	if unvisitedCount == 0 then visitedCoins = {} end
-
-	if hasWeapon() and not isBagFull and not hasTriggeredWeaponTimer then
-		if #allDescendants > 0 then
-			foundCoinsMidTimer = true
-		else
-			weaponTimer = weaponTimer + dt
-			if weaponTimer >= TIMER_THRESHOLD then
-				isBagFull = true
-				hasTriggeredWeaponTimer = true
+		if not isCoinFading(part) then
+			activeCoinCount = activeCoinCount + 1
+			if not visitedCoins[part] then 
+				unvisitedCount = unvisitedCount + 1 
 			end
 		end
+	end
+
+	if unvisitedCount == 0 then visitedCoins = {} end
+
+	if not isBagFull and activeCoinCount == 0 and coinsThisSpawn > 0 then
+		isBagFull = true
 	end
 
 	if isBagFull then
@@ -1459,13 +2126,18 @@ RunService.Heartbeat:Connect(function(dt)
 		
 		if not hasTeleportedToSafeZone then
 			isScriptTeleporting = true
-			rootPart.Anchored = false
+			
 			if rootPart:FindFirstChild("SmoothFarmVelocity") then
 				rootPart.SmoothFarmVelocity:Destroy()
 			end
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			rootPart.Anchored = false
 
 			if humanoid then
+				humanoid.PlatformStand = false
 				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 			end
 			
@@ -1477,7 +2149,6 @@ RunService.Heartbeat:Connect(function(dt)
 				end
 			end
 
-			rootPart.Anchored = false
 			rootPart.CFrame = CFrame.new(610, 562, 60)
 			hasTeleportedToSafeZone = true
 			lastPosition = rootPart.Position
@@ -1485,22 +2156,26 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 
 		safeZoneTimer = safeZoneTimer + dt
-		local remainingSafeTime = math.max(0, math.ceil(HOLD_SAFEZONE_TIME - safeZoneTimer))
-		if statusLabel then 
-			statusLabel.Text = string.format("Status: Holding Gun (%ds) -> Reset", remainingSafeTime) 
-		end
 
 		if hasKnife() and isAutoKillAllActive then
 			pcall(killAll)
 		elseif hasGun() and isShootMurdererActive then
 			pcall(shootMurd)
+		elseif not hasWeapon() and isAutoFlingMurdererActive then
+			pcall(flingMurd)
 		end
 
-		if safeZoneTimer >= HOLD_SAFEZONE_TIME and not isResetting then
-			isResetting = true
-			if humanoid and humanoid.Health > 0 then
-				humanoid.Health = 0
+		if safeZoneTimer >= HOLD_SAFEZONE_TIME then
+			safeZoneTimer = 0
+			coinsThisSpawn = 0
+			isBagFull = false
+			hasTeleportedToSafeZone = false
+			
+			if rootPart:FindFirstChild("SmoothFarmVelocity") then
+				rootPart.SmoothFarmVelocity:Destroy()
 			end
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.Anchored = false
 		end
 
 		return
@@ -1512,18 +2187,34 @@ RunService.Heartbeat:Connect(function(dt)
 	local shortestDistance = math.huge
 	local rootPos = rootPart.Position
 
+	local murdHrpPos = nil
+	if isAvoidMurdererActive then
+		local murd = getMurd()
+		if murd and murd.Character then
+			local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
+			if hrp then murdHrpPos = hrp.Position end
+		end
+	end
+
 	for _, part in ipairs(allDescendants) do
 		if not isCoinFading(part) and not visitedCoins[part] then
 			local cf = getExactCoinCFrame(part)
 			if cf then
-				local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
+				local heightOffset = settingsData.HeightOffset
 				local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
-				local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
+				
+				local shouldSkip = false
+				if murdHrpPos and (targetPosWithOffset - murdHrpPos).Magnitude <= 15 then
+					shouldSkip = true
+				end
 
-				if distanceToTarget < shortestDistance then
-					shortestDistance = distanceToTarget
-					closestPart = part
-					closestCF = cf
+				if not shouldSkip then
+					local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
+					if distanceToTarget < shortestDistance then
+						shortestDistance = distanceToTarget
+						closestPart = part
+						closestCF = cf
+					end
 				end
 			end
 		end
@@ -1533,28 +2224,33 @@ RunService.Heartbeat:Connect(function(dt)
 		rootPart.Anchored = false
 		isScriptTeleporting = false
 
-		if statusLabel then 
-			if hasWeapon() and not hasTriggeredWeaponTimer then
-				statusLabel.Text = string.format("Status: Farming W/ Weapon (%d/50)...", coinsThisSpawn)
-			else
-				statusLabel.Text = string.format("Status: Farming (%d/50)...", coinsThisSpawn)
-			end
-		end
-
 		local exactCoinPos = updateTargetAnchor(closestCF)
-		local speed = (speedInput and tonumber(speedInput.Text)) or settingsData.Speed
-		local heightOffset = (heightInput and tonumber(heightInput.Text)) or settingsData.HeightOffset
+		local speed = settingsData.Speed
+		local heightOffset = settingsData.HeightOffset
 		local finalTargetPos = exactCoinPos + Vector3.new(0, heightOffset, 0)
-
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
 
 		local targetPosition = finalTargetPos
 		local currentPosition = rootPart.Position
 		local distance = (targetPosition - currentPosition).Magnitude
 
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+		if currentFarmType == "Standing" or currentFarmType == "Lay on back" then
+			humanoid.PlatformStand = true
+			for _, desc in ipairs(character:GetDescendants()) do
+				if desc:IsA("Motor6D") then
+					desc.CurrentAngle = 0
+				end
+			end
+		end
+
 		if distance >= 500 then
 			isScriptTeleporting = true
-			rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, 0)
+			if currentFarmType == "Lay on back" then
+				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, math.rad(90))
+			else
+				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, 0, 0)
+			end
 			lastPosition = rootPart.Position
 			bv.Velocity = Vector3.zero
 			task.delay(0.2, function() isScriptTeleporting = false end)
@@ -1563,7 +2259,11 @@ RunService.Heartbeat:Connect(function(dt)
 			bv.Velocity = direction.Unit * speed
 			
 			local currentPos = rootPart.Position
-			rootPart.CFrame = CFrame.new(currentPos.X, currentPos.Y, currentPos.Z) * CFrame.Angles(math.rad(90), 0, 0)
+			if currentFarmType == "Lay on back" then
+				rootPart.CFrame = CFrame.new(currentPos.X, currentPos.Y, currentPos.Z) * CFrame.Angles(math.rad(90), 0, math.rad(90))
+			else
+				rootPart.CFrame = CFrame.new(currentPos.X, currentPos.Y, currentPos.Z) * CFrame.Angles(0, 0, 0)
+			end
 			
 			lastPosition = rootPart.Position
 
@@ -1575,22 +2275,6 @@ RunService.Heartbeat:Connect(function(dt)
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		bv.Velocity = Vector3.zero
 		rootPart.Anchored = false
-
-		if isCurrentlyVoting then
-			lastPosition = rootPart.Position
-			if statusLabel then statusLabel.Text = "Status: Auto Voting..." end
-		else
-			lastPosition = rootPart.Position
-
-			if hasWeapon() and foundCoinsMidTimer and not hasTriggeredWeaponTimer then
-				isBagFull = true
-				hasTriggeredWeaponTimer = true
-			elseif hasWeapon() and not hasTriggeredWeaponTimer then
-				local remaining = math.max(0, math.ceil(TIMER_THRESHOLD - weaponTimer))
-				if statusLabel then statusLabel.Text = string.format("Status: Waiting Coins (%ds)...", remaining) end
-			else
-				if statusLabel then statusLabel.Text = string.format("Status: Waiting for Coins... (%d/50)", coinsThisSpawn) end
-			end
-		end
+		lastPosition = rootPart.Position
 	end
 end)
