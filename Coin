@@ -100,6 +100,7 @@ local isCurrentlyVoting = false
 local isScriptTeleporting = false
 local lastPosition = Vector3.new(0, 0, 0)
 local isBotTeleporting = false
+local isShootingActive = false
 
 -- Reset Player / Fling Variables
 local lastResetAttempt = 0
@@ -158,6 +159,12 @@ local function onCharacterAdded(char)
 		hrp.Anchored = false
 		lastPosition = hrp.Position
 	end
+	
+	-- Restore camera subject
+	pcall(function()
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then Camera.CameraSubject = hum end
+	end)
 end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
@@ -493,10 +500,6 @@ local function equipKnife()
 	return false
 end
 
-local function hasWeapon()
-	return hasKnife() or hasGun()
-end
-
 local function getMurd()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
@@ -600,7 +603,6 @@ task.spawn(function()
 		task.wait(0.3)
 		notifFrame:TweenPosition(UDim2.new(0.5, -150, 0.5, -37), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.5, true)
 		
-		-- Auto-close after 15 seconds if not already closed
 		task.wait(15.0)
 		dismissNotification()
 	end)
@@ -613,7 +615,6 @@ task.spawn(function()
 	screenGui.IgnoreGuiInset = true
 	screenGui.Parent = playerGui
 
-	-- Floating Toggle Button
 	local toggleGuiBtn = Instance.new("ImageButton")
 	toggleGuiBtn.Size = UDim2.new(0, 55, 0, 55)
 	toggleGuiBtn.Position = UDim2.new(0, 15, 0.3, 0)
@@ -622,7 +623,6 @@ task.spawn(function()
 	toggleGuiBtn.Active = true
 	toggleGuiBtn.Parent = screenGui
 
-	-- Seamless Dragging Logic (Fixed Jump)
 	local dragging = false
 	local dragInput = nil
 	local dragStart = Vector2.zero
@@ -659,7 +659,6 @@ task.spawn(function()
 		end
 	end)
 
-	-- Main Frame
 	local mainFrame = Instance.new("Frame")
 	mainFrame.Size = UDim2.new(0, 240, 0, 260)
 	mainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
@@ -734,7 +733,6 @@ task.spawn(function()
 		mainFrame.Visible = isGuiVisible
 	end)
 
-	-- Tabs Switcher (AutoFarm / Stats / Settings / Bots Control)
 	local tabContainer = Instance.new("Frame")
 	tabContainer.Size = UDim2.new(1, -10, 0, 26)
 	tabContainer.Position = UDim2.new(0, 5, 0, 38)
@@ -935,13 +933,11 @@ task.spawn(function()
 		return lbl
 	end
 
-	-- ==================== AUTO FARM SECTION ====================
 	createHeaderLabel(autoFarmScroll, "AUTO FARM:", 0)
 
 	local farmerBtn = createButton(autoFarmScroll, "Auto Farm Coins", 22, isFarmingActive)
 	local voteBtn = createButton(autoFarmScroll, "Auto Vote Smallest Maps", 50, isAutoVoteActive)
 
-	-- ==================== SLIDERS & DROPDOWN ====================
 	local activeSlider = nil
 
 	local function createSliderWithInput(labelText, minVal, maxVal, defaultVal, posY, settingKey)
@@ -1070,7 +1066,6 @@ task.spawn(function()
 	createSliderWithInput("Farm Speed", 10, 150, settingsData.Speed, 78, "Speed")
 	createSliderWithInput("Farm Height Offset", -6, 6, settingsData.HeightOffset, 116, "HeightOffset")
 
-	-- Dropdown for Farm Type
 	local dropdownContainer = Instance.new("Frame")
 	dropdownContainer.Size = UDim2.new(1, -6, 0, 50)
 	dropdownContainer.Position = UDim2.new(0, 3, 0, 154)
@@ -1215,14 +1210,12 @@ task.spawn(function()
 	murdStroke.Thickness = 1.5
 	murdStroke.Parent = murdRoleLabel
 
-	-- ==================== CUSTOMIZATIONS SECTION ====================
 	createHeaderLabel(autoFarmScroll, "CUSTOMIZATIONS:", 388)
 	local showCoinsBtn = createButton(autoFarmScroll, "Show Coins", 410, isShowCoinsActive)
 	local optimizedCoinsBtn = createButton(autoFarmScroll, "Optimize Coins", 438, isOptimizedCoinsActive)
 	local fpsBtn = createButton(autoFarmScroll, "FPS Boost", 466, isFpsBoosterActive)
 	local showCoinBoxBtn = createButton(autoFarmScroll, "Show Coin Aura Box", 494, isShowCoinAuraBoxActive)
 
-	-- ==================== SETTINGS TAB CONTENTS ====================
 	createHeaderLabel(settingsScroll, "SETTINGS:", 0)
 	local antiFlingBtn = createButton(settingsScroll, "Anti Fling", 25, isAntiFlingActive)
 	local antiAFKBtn = createButton(settingsScroll, "Anti AFK", 55, isAntiAFKActive)
@@ -1258,7 +1251,6 @@ task.spawn(function()
 		updateToggleVisual(rejoinBtn, isAutoRejoinActive, "Auto Rejoin")
 	end)
 
-	-- ==================== STATS TAB CONTENTS ====================
 	createHeaderLabel(statsScroll, "STATISTICS:", 0)
 	statusLabel = createStatBox(statsScroll, 22, "Status: Idle / Ready", Color3.fromRGB(0, 255, 170))
 	sessionCoinsLabel = createStatBox(statsScroll, 52, "Session Coins: 0", Color3.fromRGB(255, 215, 0))
@@ -1266,7 +1258,6 @@ task.spawn(function()
 	avgCphLabel = createStatBox(statsScroll, 112, "Average Coins/Hr: 0", Color3.fromRGB(80, 200, 255))
 	serverTimerLabel = createStatBox(statsScroll, 142, "Server Uptime: 0s", Color3.fromRGB(200, 180, 255))
 
-	-- ==================== BOTS CONTROL SECTION ====================
 	createHeaderLabel(botCtrlScroll, "BOTS CONTROL:", 0)
 
 	local function createBotButton(name, posY, buttonText, targetCFrame)
@@ -1355,19 +1346,13 @@ task.spawn(function()
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 			if rootPart then
 				rootPart.Anchored = false
-				if rootPart:FindFirstChild("SmoothFarmVelocity") then rootPart.SmoothFarmVelocity:Destroy() end
-				if rootPart:FindFirstChild("TestRagdollVelocity") then rootPart.TestRagdollVelocity:Destroy() end
-			end
-			if character then
-				for _, part in ipairs(character:GetDescendants()) do
-					if part:IsA("BasePart") then part.CanCollide = true end
-				end
 			end
 			if humanoid then
 				humanoid.PlatformStand = false
 				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
 				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+				Camera.CameraSubject = humanoid
 			end
 		end
 	end)
@@ -1412,6 +1397,12 @@ task.spawn(function()
 		settingsData.ShootMurderer = isShootMurdererActive
 		saveSettings()
 		updateToggleVisual(shootBtn, isShootMurdererActive, "Auto Shoot Murderer")
+		if not isShootMurdererActive then
+			pcall(function()
+				local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+				if hum then Camera.CameraSubject = hum end
+			end)
+		end
 	end)
 
 	killBtn.MouseButton1Click:Connect(function()
@@ -1515,7 +1506,6 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 
-	-- Update coin aura visual box position
 	if coinAuraBoxPart and coinAuraBoxPart.Parent then
 		pcall(function()
 			local char = LocalPlayer.Character
@@ -1557,7 +1547,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 --------------------------------------------------------
--- ADVANCED PREDICTIVE SHOOTING & TARGETING
+-- ADVANCED PREDICTIVE SHOOTING & TARGETING (SAFE ZONE TP + JUMP)
 --------------------------------------------------------
 local motionPart, motionPosition, motionTime
 local measuredVelocity = Vector3.zero
@@ -1591,9 +1581,9 @@ local function calculateTravelAim(part, currentPing, currentFps)
 	local velocity = assembly:Lerp(measuredVelocity, 0.35)
 	
 	local lead = (currentPing * 0.95) + (1 / math.max(currentFps, 30)) * 0.45
-	lead = math.clamp(lead, 0.02, 0.12)
+	lead = math.clamp(lead, 0.02, 0.15)
 	
-	local predictedVelocity = Vector3.new(velocity.X, velocity.Y * 0.4, velocity.Z)
+	local predictedVelocity = Vector3.new(velocity.X, velocity.Y * 0.3, velocity.Z)
 	return part.Position + (predictedVelocity * lead)
 end
 
@@ -1616,7 +1606,7 @@ local function findGunRemote()
 	return nil
 end
 
-local function shootMurdererInstantly(targetPart, currentPing, currentFps)
+local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, currentFps)
 	local success = false
 
 	pcall(function()
@@ -1628,17 +1618,40 @@ local function shootMurdererInstantly(targetPart, currentPing, currentFps)
 
 		if not targetPart or not camera or not character or not humanoid or not rootPart then return end
 
-		rootPart.Anchored = false
-		local murdererCF = targetPart.CFrame
-		rootPart.CFrame = murdererCF * CFrame.new(0, 0, 4) * CFrame.Angles(0, math.rad(180), 0)
+		-- Only shoot & teleport when bag is full (or farming is not active)
+		if isFarmingActive and not isBagFull then return end
 
-		local gun = character:FindFirstChild("Gun")
+		-- Check if player has the gun
+		local gun = character:FindFirstChild("Gun") or character:FindFirstChild("Revolver")
 		if not gun and backpack then
-			gun = backpack:FindFirstChild("Gun")
-			if gun then
-				humanoid:EquipTool(gun)
-				task.wait(0.03)
+			gun = backpack:FindFirstChild("Gun") or backpack:FindFirstChild("Revolver")
+		end
+
+		if not gun then return end
+
+		rootPart.Anchored = false
+		
+		-- Teleport to the safe zone when bag is full
+		rootPart.CFrame = CFrame.new(610, 562, 60)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+
+		-- Force jump once upon teleporting to prevent ragdolling
+		humanoid.PlatformStand = false
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+
+		-- Spectate Murderer automatically
+		if murdPlayer and murdPlayer.Character then
+			local murdHum = murdPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if murdHum then
+				camera.CameraSubject = murdHum
 			end
+		end
+
+		if gun.Parent == backpack then
+			humanoid:EquipTool(gun)
+			task.wait(0.03)
 		end
 
 		local remote = findGunRemote()
@@ -1693,20 +1706,36 @@ local function updateTargetAnchor(cframe)
 end
 
 local function shootMurd()
-	local murd = getMurd()
-	while murd and murd.Character and isShootMurdererActive do
-		local hum = murd.Character:FindFirstChildOfClass("Humanoid")
-		if hum and hum.Health <= 0 then break end
-		local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
-		if hrp then
-			shootMurdererInstantly(hrp, currentPingVal, currentFps)
+	while isShootMurdererActive do
+		if not isFarmingActive or isBagFull then
+			local murd = getMurd()
+			if murd and murd.Character then
+				local hum = murd.Character:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then
+					local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
+					if hrp then
+						shootMurdererInstantly(hrp, murd, currentPingVal, currentFps)
+					end
+				end
+			end
 		else
-			break
+			pcall(function()
+				local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+				if hum then Camera.CameraSubject = hum end
+			end)
 		end
-		task.wait(0.1)
-		murd = getMurd()
+		task.wait(2.8)
 	end
 end
+
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		if isShootMurdererActive then
+			shootMurd()
+		end
+	end
+end)
 
 local function killAll()
 	equipKnife()
@@ -1728,7 +1757,6 @@ local function killAll()
 	end
 end
 
--- Helper functions for resetPlayer (Fling)
 local function isWhitelisted(player)
 	return false
 end
@@ -1844,16 +1872,18 @@ end
 
 local function flingMurd()
 	while isAutoFlingMurdererActive do
-		local murd = getMurd()
-		if murd and murd.Character then
-			local hum = murd.Character:FindFirstChildOfClass("Humanoid")
-			if hum and hum.Health > 0 then
-				resetPlayer(murd)
+		if not (isFarmingActive and not isBagFull) then
+			local murd = getMurd()
+			if murd and murd.Character then
+				local hum = murd.Character:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then
+					resetPlayer(murd)
+				else
+					break
+				end
 			else
 				break
 			end
-		else
-			break
 		end
 		task.wait(0.1)
 	end
@@ -1964,7 +1994,6 @@ end)
 RunService.Heartbeat:Connect(function(dt)
 	local character, rootPart, humanoid = getCharacterParts()
 
-	-- ==================== AUTO GRAB GUN HANDLER (GUN TELEPORTS TO TORSO) ====================
 	if isAutoGrabGunActive and not hasGun() and not hasKnife() and rootPart then
 		pcall(function()
 			for _, map in ipairs(Workspace:GetChildren()) do
@@ -2041,6 +2070,10 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if character and rootPart and isFarmingActive and not isBagFull then
+		if isShootMurdererActive and isBagFull then
+			return
+		end
+
 		local radius = isCoinAuraActive and 1000 or 15
 		local rootPos = rootPart.Position
 		local coinParts = getCoinParts(containers)
@@ -2094,15 +2127,6 @@ RunService.Heartbeat:Connect(function(dt)
 		if part:IsA("BasePart") then part.CanCollide = false end
 	end
 
-	local bv = rootPart:FindFirstChild("SmoothFarmVelocity")
-	if not bv then
-		bv = Instance.new("BodyVelocity")
-		bv.Name = "SmoothFarmVelocity"
-		bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-		bv.P = 25000
-		bv.Parent = rootPart
-	end
-
 	local unvisitedCount = 0
 	local activeCoinCount = 0
 	for _, part in ipairs(allDescendants) do
@@ -2124,58 +2148,57 @@ RunService.Heartbeat:Connect(function(dt)
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
-		if not hasTeleportedToSafeZone then
-			isScriptTeleporting = true
-			
-			if rootPart:FindFirstChild("SmoothFarmVelocity") then
-				rootPart.SmoothFarmVelocity:Destroy()
-			end
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
-			rootPart.Anchored = false
-
-			if humanoid then
-				humanoid.PlatformStand = false
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-			end
-			
-			if character then
-				for _, part in ipairs(character:GetDescendants()) do
-					if part:IsA("BasePart") then
-						part.CanCollide = true
-					end
-				end
-			end
-
-			rootPart.CFrame = CFrame.new(610, 562, 60)
-			hasTeleportedToSafeZone = true
-			lastPosition = rootPart.Position
-			task.delay(0.2, function() isScriptTeleporting = false end)
-		end
-
-		safeZoneTimer = safeZoneTimer + dt
-
 		if hasKnife() and isAutoKillAllActive then
 			pcall(killAll)
-		elseif hasGun() and isShootMurdererActive then
-			pcall(shootMurd)
 		elseif not hasWeapon() and isAutoFlingMurdererActive then
 			pcall(flingMurd)
 		end
 
-		if safeZoneTimer >= HOLD_SAFEZONE_TIME then
-			safeZoneTimer = 0
-			coinsThisSpawn = 0
-			isBagFull = false
-			hasTeleportedToSafeZone = false
-			
-			if rootPart:FindFirstChild("SmoothFarmVelocity") then
-				rootPart.SmoothFarmVelocity:Destroy()
+		if not isShootMurdererActive then
+			if not hasTeleportedToSafeZone then
+				isScriptTeleporting = true
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+				rootPart.Anchored = false
+
+				if humanoid then
+					humanoid.PlatformStand = false
+					humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+					humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+					humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+				end
+				
+				if character then
+					for _, part in ipairs(character:GetDescendants()) do
+						if part:IsA("BasePart") then
+							part.CanCollide = true
+						end
+					end
+				end
+
+				rootPart.CFrame = CFrame.new(610, 562, 60)
+				
+				-- Jump once to prevent ragdolling
+				pcall(function()
+					humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+					humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+				end)
+
+				hasTeleportedToSafeZone = true
+				lastPosition = rootPart.Position
+				task.delay(0.2, function() isScriptTeleporting = false end)
 			end
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.Anchored = false
+
+			safeZoneTimer = safeZoneTimer + dt
+
+			if safeZoneTimer >= HOLD_SAFEZONE_TIME then
+				safeZoneTimer = 0
+				coinsThisSpawn = 0
+				isBagFull = false
+				hasTeleportedToSafeZone = false
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.Anchored = false
+			end
 		end
 
 		return
@@ -2252,11 +2275,10 @@ RunService.Heartbeat:Connect(function(dt)
 				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, 0, 0)
 			end
 			lastPosition = rootPart.Position
-			bv.Velocity = Vector3.zero
 			task.delay(0.2, function() isScriptTeleporting = false end)
 		else
 			local direction = targetPosition - currentPosition
-			bv.Velocity = direction.Unit * speed
+			rootPart.AssemblyLinearVelocity = direction.Unit * speed
 			
 			local currentPos = rootPart.Position
 			if currentFarmType == "Lay on back" then
@@ -2273,7 +2295,7 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	else
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
-		bv.Velocity = Vector3.zero
+		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.Anchored = false
 		lastPosition = rootPart.Position
 	end
