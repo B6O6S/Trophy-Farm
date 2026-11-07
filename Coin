@@ -13,7 +13,7 @@ local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local Camera = Workspace.CurrentCamera
 
-local LocalPlayer = Players.LocalPlayer
+local localPlayer = Players.LocalPlayer
 
 -- Server Join Start Time
 local serverJoinTime = tick()
@@ -97,9 +97,15 @@ local wasVotingActive = false
 local isWaitingAfterVote = false
 local postVoteStartTime = 0
 
+-- Respawn 18-Second Timer State Flags
+local isWaitingAfterRespawn = false
+local respawnTimerStartTime = 0
+
 local isScriptTeleporting = false
 local lastPosition = Vector3.new(0, 0, 0)
 local isBotTeleporting = false
+local hasInstantTeleportedThisSpawn = false
+local lastActiveCoinCount = 0
 
 -- Coins Per Hour & Performance Tracker Variables
 local farmStartTime = nil
@@ -114,6 +120,7 @@ local visitedCoins = {}
 local votedChar = nil
 local coinHighlights = {}
 local coinAuraBoxPart = nil
+local safePlatformPart = nil
 
 -- Dynamic Performance Trackers for Predictive Shooting
 local currentPingVal = 0
@@ -136,7 +143,28 @@ local function formatDuration(seconds)
 	end
 end
 
--- Reset State On Respawn
+-- Create Safe Platform at (99999, 99999, 99999)
+local function getOrCreateSafePlatform()
+	if not safePlatformPart or not safePlatformPart.Parent then
+		pcall(function()
+			safePlatformPart = Instance.new("Part")
+			safePlatformPart.Name = "ZanwahSafePlatform"
+			safePlatformPart.Size = Vector3.new(300, 0.1, 300)
+			safePlatformPart.Position = Vector3.new(99999, 99999, 99999)
+			safePlatformPart.Anchored = true
+			safePlatformPart.CanCollide = true
+			safePlatformPart.Material = Enum.Material.Plastic
+			safePlatformPart.Transparency = 0.5
+			safePlatformPart.Color = Color3.fromRGB(163, 162, 165)
+			safePlatformPart.Parent = Workspace
+		end)
+	end
+	return safePlatformPart
+end
+
+getOrCreateSafePlatform()
+
+-- Reset State On Respawn & Start 18-Second Respawn Timer
 local function onCharacterAdded(char)
 	isBagFull = false
 	hasHandledFullBag = false
@@ -145,10 +173,18 @@ local function onCharacterAdded(char)
 	wasVotingActive = false
 	isWaitingAfterVote = false
 	postVoteStartTime = 0
+	
+	-- Start/Reset 18-Second Respawn Timer
+	isWaitingAfterRespawn = true
+	respawnTimerStartTime = tick()
+
 	isScriptTeleporting = false
 	isBotTeleporting = false
+	hasInstantTeleportedThisSpawn = false
+	lastActiveCoinCount = 0
 	visitedCoins = {}
 	trackedPickupCoins = {}
+	getOrCreateSafePlatform()
 	local hrp = char:WaitForChild("HumanoidRootPart", 5)
 	if hrp then
 		hrp.Anchored = false
@@ -161,7 +197,7 @@ local function onCharacterAdded(char)
 	end)
 end
 
-LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
 
 -- ==================== ANTI VOID IMPLEMENTATION ====================
 local function applyAntiVoid(enable)
@@ -188,19 +224,18 @@ task.spawn(function()
 	end)
 end)
 
--- ==================== ANTI-FLING (OPTIMIZED NOCLIP - NO LAG) ====================
+-- ==================== ANTI-FLING & PLAYER NOCLIP (WALK THROUGH PLAYERS) ====================
 local function SetupAntiFling()
     RunService.Heartbeat:Connect(function()
-        if not isAntiFlingActive then return end
         pcall(function()
-            local Character = LocalPlayer.Character
+            local Character = localPlayer.Character
             if not Character then return end
             
             local myHrp = Character:FindFirstChild("HumanoidRootPart")
             if not myHrp then return end
 
             for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character then
+                if player ~= localPlayer and player.Character then
                     local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
                     if pRoot then
                         pRoot.CanCollide = false
@@ -213,7 +248,7 @@ local function SetupAntiFling()
 end
 
 SetupAntiFling()
-LocalPlayer.CharacterAdded:Connect(function()
+localPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     SetupAntiFling()
 end)
@@ -221,7 +256,7 @@ end)
 -- ==================== ANTI-AFK IMPLEMENTATION ====================
 if not getgenv().AntiAFKLoaded then 
     getgenv().AntiAFKLoaded = true 
-    LocalPlayer.Idled:Connect(function() 
+    localPlayer.Idled:Connect(function() 
         if isAntiAFKActive then
             VirtualUser:CaptureController() 
             VirtualUser:ClickButton2(Vector2.new()) 
@@ -235,7 +270,7 @@ local function attemptRejoin()
 	task.spawn(function()
 		while isAutoRejoinActive do
 			pcall(function()
-				TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
 			end)
 			task.wait(1)
 		end
@@ -448,12 +483,12 @@ end
 
 -- Tool & Weapon Identification & Force Equip Logic
 local function getGun()
-	local char = LocalPlayer.Character
+	local char = localPlayer.Character
 	if char then
 		local g = char:FindFirstChild("Gun") or char:FindFirstChild("Revolver")
 		if g then return g end
 	end
-	local bp = LocalPlayer:FindFirstChild("Backpack")
+	local bp = localPlayer:FindFirstChild("Backpack")
 	if bp then
 		local g = bp:FindFirstChild("Gun") or bp:FindFirstChild("Revolver")
 		if g then return g end
@@ -466,12 +501,12 @@ local function hasGun()
 end
 
 local function getKnife()
-	local char = LocalPlayer.Character
+	local char = localPlayer.Character
 	if char then
 		local k = char:FindFirstChild("Knife")
 		if k then return k end
 	end
-	local bp = LocalPlayer:FindFirstChild("Backpack")
+	local bp = localPlayer:FindFirstChild("Backpack")
 	if bp then
 		local k = bp:FindFirstChild("Knife")
 		if k then return k end
@@ -490,7 +525,7 @@ end
 local function equipKnife()
 	local knife = getKnife()
 	if not knife then return false end
-	local char = LocalPlayer.Character
+	local char = localPlayer.Character
 	if not char then return false end
 	if knife.Parent == char then return true end
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -507,7 +542,7 @@ end
 
 local function getMurd()
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LocalPlayer then
+		if plr ~= localPlayer then
 			local bp = plr:FindFirstChild("Backpack")
 			local char = plr.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -521,76 +556,99 @@ local function getMurd()
 end
 
 --------------------------------------------------------
--- CUSTOM INNOCENT FLING METHOD (RESET PLAYER LOOP)
+-- CUSTOM TARGET RESET METHOD (STICKY INFINITE LOOP)
 --------------------------------------------------------
 local function resetPlayer(TargetPlayer)
-    if not TargetPlayer or TargetPlayer == LocalPlayer then return end
+    if not TargetPlayer or not TargetPlayer.Parent then return end
+    
+    while isBagFull and isFarmingActive and TargetPlayer.Parent do
+        local tChar = TargetPlayer.Character
+        local tHum = tChar and tChar:FindFirstChildOfClass("Humanoid")
+        if not tHum or tHum.Health <= 0 then break end
 
-    local Character = LocalPlayer.Character
-    if not Character then return end
+        local character = localPlayer.Character
+        if not character then break end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local rootPart = humanoid and humanoid.RootPart
+        if not (character and humanoid and rootPart and tChar) then break end
 
-    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    local RootPart = Character:FindFirstChild("HumanoidRootPart")
-    local TCharacter = TargetPlayer.Character
+        local tRootPart = tChar:FindFirstChild("HumanoidRootPart")
+        local tHead = tChar:FindFirstChild("Head")
+        if not tRootPart then break end
 
-    if not (Humanoid and RootPart and TCharacter) then return end
+        humanoid.PlatformStand = true
 
-    local TRootPart = TCharacter:FindFirstChild("HumanoidRootPart")
-    local THead = TCharacter:FindFirstChild("Head")
+        -- Apply extreme downward velocity to force physics calculations
+        local bv = Instance.new("BodyVelocity")
+        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bv.Velocity = Vector3.new(0, -50000, 0)
+        bv.Parent = rootPart
 
-    if not TRootPart then return end
+        local bg = Instance.new("BodyGyro")
+        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bg.P = 1000000
+        bg.Parent = rootPart
 
-    local savedCFrame = RootPart.CFrame
+        local originalDestroyHeight = Workspace.FallenPartsDestroyHeight
+        Workspace.FallenPartsDestroyHeight = 0/0
 
-    Humanoid.PlatformStand = true
+        local startTime = tick()
+        local resetDuration = 1.2
+        local completed = false
 
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-    bv.Velocity = Vector3.new(0, -50000, 0)
-    bv.Parent = RootPart
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            local currentTargetChar = TargetPlayer.Character
+            local currentTargetRoot = currentTargetChar and currentTargetChar:FindFirstChild("HumanoidRootPart")
+            local currentTargetHead = currentTargetChar and currentTargetChar:FindFirstChild("Head")
 
-    local bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-    bg.P = 1000000
-    bg.Parent = RootPart
+            if tick() - startTime > resetDuration or not currentTargetChar or not currentTargetRoot or not currentTargetRoot.Parent or not isBagFull then
+                Workspace.FallenPartsDestroyHeight = originalDestroyHeight
+                if bv.Parent then bv:Destroy() end
+                if bg.Parent then bg:Destroy() end
+                humanoid.PlatformStand = false
+                if conn then conn:Disconnect() end
+                completed = true
+                return
+            end
 
-    local startTime = tick()
-    local randomAngVel = Vector3.new(5000, 8000, 6000)
+            if currentTargetRoot and currentTargetRoot.Parent and character and character.Parent then
+                local headPos = currentTargetHead and currentTargetHead.Position or (currentTargetRoot.Position + Vector3.new(0, 2.5, 0))
+                
+                -- Lock directly onto target head/root position and spin violently
+                rootPart.CFrame = CFrame.new(headPos) * CFrame.Angles(math.pi / 2, 0, 0)
+                rootPart.AssemblyLinearVelocity = Vector3.new(0, -50000, 0)
+                rootPart.AssemblyAngularVelocity = Vector3.new(7500, 7500, 7500)
+                
+                -- Fire touch interest continuously to register impact
+                pcall(function()
+                    firetouchinterest(rootPart, currentTargetRoot, 0)
+                    firetouchinterest(rootPart, currentTargetRoot, 1)
+                    if currentTargetHead then
+                        firetouchinterest(rootPart, currentTargetHead, 0)
+                        firetouchinterest(rootPart, currentTargetHead, 1)
+                    end
+                end)
+            end
+        end)
 
-    local connection
-    connection = RunService.Heartbeat:Connect(function()
-        if tick() - startTime > 1.2
-            or not TargetPlayer.Character
-            or not TRootPart.Parent 
-            or not isBagFull then
-
-            if bv.Parent then bv:Destroy() end
-            if bg.Parent then bg:Destroy() end
-
-            Humanoid.PlatformStand = false
-            RootPart.AssemblyLinearVelocity = Vector3.zero
-            RootPart.AssemblyAngularVelocity = Vector3.zero
-            RootPart.CFrame = savedCFrame
-
-            Humanoid:ChangeState(
-                Enum.HumanoidStateType.GettingUp
-            )
-
-            connection:Disconnect()
-            return
+        while not completed and TargetPlayer.Parent and isBagFull do
+            task.wait(0.05)
         end
 
-        local targetPos = THead and THead.Position or TRootPart.Position
+        if not completed then
+            Workspace.FallenPartsDestroyHeight = originalDestroyHeight
+            if bv.Parent then bv:Destroy() end
+            if bg.Parent then bg:Destroy() end
+            humanoid.PlatformStand = false
+            if conn then conn:Disconnect() end
+        end
 
-        RootPart.CFrame =
-            CFrame.new(targetPos) *
-            CFrame.Angles(math.random(), math.random(), 0)
-
-        RootPart.AssemblyLinearVelocity =
-            Vector3.new(math.random(-500, 500), -50000, math.random(-500, 500))
-
-        RootPart.AssemblyAngularVelocity = randomAngVel
-    end)
+        task.wait(0.1)
+        local postChar = TargetPlayer.Character
+        local postHum = postChar and postChar:FindFirstChildOfClass("Humanoid")
+        if not postHum or postHum.Health <= 0 then break end
+    end
 end
 
 --------------------------------------------------------
@@ -601,7 +659,7 @@ local isMinimized = false
 local isGuiVisible = true
 
 task.spawn(function()
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui", 30)
+	local playerGui = localPlayer:WaitForChild("PlayerGui", 30)
 	if not playerGui then return end
 
 	if playerGui:FindFirstChild("EliteAutomationGui") then
@@ -1361,7 +1419,7 @@ task.spawn(function()
 
 		btn.MouseButton1Click:Connect(function()
 			if isBotTeleporting then return end
-			local currentCharacter = LocalPlayer.Character
+			local currentCharacter = localPlayer.Character
 			if not currentCharacter or not currentCharacter:FindFirstChild("HumanoidRootPart") then return end
 			local hrp = currentCharacter.HumanoidRootPart
 
@@ -1395,7 +1453,7 @@ task.spawn(function()
 		saveSettings()
 		updateToggleVisual(farmerBtn, isFarmingActive, "Auto Farm Coins")
 		
-		local character, rootPart, humanoid = LocalPlayer.Character, LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"), LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		local character, rootPart, humanoid = localPlayer.Character, localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart"), localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
 
 		if isFarmingActive then
 			farmStartTime = nil
@@ -1407,13 +1465,13 @@ task.spawn(function()
 			wasVotingActive = false
 			isWaitingAfterVote = false
 			postVoteStartTime = 0
+			isWaitingAfterRespawn = true
+			respawnTimerStartTime = tick()
 			isScriptTeleporting = false
+			hasInstantTeleportedThisSpawn = false
+			lastActiveCoinCount = 0
 			trackedPickupCoins = {}
 			if rootPart then lastPosition = rootPart.Position end
-			if humanoid then
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-			end
 		else
 			if statusLabel then statusLabel.Text = "Status: Idle / Ready" end
 			visitedCoins = {}
@@ -1424,7 +1482,10 @@ task.spawn(function()
 			wasVotingActive = false
 			isWaitingAfterVote = false
 			postVoteStartTime = 0
+			isWaitingAfterRespawn = false
 			isScriptTeleporting = false
+			hasInstantTeleportedThisSpawn = false
+			lastActiveCoinCount = 0
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 			if rootPart then
 				rootPart.Anchored = false
@@ -1434,8 +1495,6 @@ task.spawn(function()
 			end
 			if humanoid then
 				humanoid.PlatformStand = false
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 				Camera.CameraSubject = humanoid
 			end
@@ -1484,7 +1543,7 @@ task.spawn(function()
 		updateToggleVisual(shootBtn, isShootMurdererActive, "Auto Shoot Murderer")
 		if not isShootMurdererActive then
 			pcall(function()
-				local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+				local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
 				if hum then Camera.CameraSubject = hum end
 			end)
 		end
@@ -1593,7 +1652,7 @@ RunService.RenderStepped:Connect(function(dt)
 
 	if coinAuraBoxPart and coinAuraBoxPart.Parent then
 		pcall(function()
-			local char = LocalPlayer.Character
+			local char = localPlayer.Character
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			if hrp then
 				coinAuraBoxPart.CFrame = hrp.CFrame
@@ -1673,10 +1732,10 @@ local function calculateTravelAim(part, currentPing, currentFps)
 end
 
 local function findGunRemote()
-	local character = LocalPlayer.Character
+	local character = localPlayer.Character
 	local gun = character and character:FindFirstChild("Gun")
 	if not gun then
-		local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+		local backpack = localPlayer:FindFirstChildOfClass("Backpack")
 		gun = backpack and backpack:FindFirstChild("Gun")
 	end
 	if gun then
@@ -1696,14 +1755,12 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 
 	pcall(function()
 		local camera = Workspace.CurrentCamera
-		local character = LocalPlayer.Character
+		local character = localPlayer.Character
 		local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-		local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+		local backpack = localPlayer:FindFirstChildOfClass("Backpack")
 
 		if not targetPart or not camera or not character or not humanoid or not rootPart then return end
-
-		if isFarmingActive and not isBagFull then return end
 
 		local gun = character:FindFirstChild("Gun") or character:FindFirstChild("Revolver")
 		if not gun and backpack then
@@ -1712,15 +1769,19 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 
 		if not gun then return end
 
+		-- Instantly equip gun before teleporting
+		if gun.Parent == backpack then
+			humanoid:EquipTool(gun)
+		end
+
+		isScriptTeleporting = true
 		rootPart.Anchored = false
 		
-		rootPart.CFrame = CFrame.new(610, 562, 60)
+		-- Instantly TP to safe platform
+		rootPart.CFrame = CFrame.new(99999, 99999 + 1.2, 99999)
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
-
-		humanoid.PlatformStand = false
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		task.delay(0.2, function() isScriptTeleporting = false end)
 
 		if murdPlayer and murdPlayer.Character then
 			local murdHum = murdPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -1729,17 +1790,13 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 			end
 		end
 
-		if gun.Parent == backpack then
-			humanoid:EquipTool(gun)
-			task.wait(0.03)
-		end
-
 		local remote = findGunRemote()
 		if not remote then return end
 
 		local aim = calculateTravelAim(targetPart, currentPing, currentFps)
 		local origin = camera.CFrame.Position
 
+		-- Fire remote immediately with zero delay
 		remote:FireServer(CFrame.lookAt(origin, aim), CFrame.new(aim))
 		success = true
 	end)
@@ -1748,7 +1805,7 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 end
 
 local function getCharacterParts()
-	local character = LocalPlayer.Character
+	local character = localPlayer.Character
 	if not character then return nil, nil, nil end
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character:FindFirstChild("Humanoid")
@@ -1787,7 +1844,7 @@ end
 
 local function shootMurd()
 	while isShootMurdererActive do
-		if not isFarmingActive or isBagFull then
+		if isBagFull then
 			local murd = getMurd()
 			if murd and murd.Character then
 				local hum = murd.Character:FindFirstChildOfClass("Humanoid")
@@ -1800,11 +1857,11 @@ local function shootMurd()
 			end
 		else
 			pcall(function()
-				local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+				local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
 				if hum then Camera.CameraSubject = hum end
 			end)
 		end
-		task.wait(2.8)
+		task.wait(1.5)
 	end
 end
 
@@ -1827,7 +1884,7 @@ local function killAll()
 	if not handleTouched then return end
 	local targets = {}
 	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= LocalPlayer and p.Character then
+		if p ~= localPlayer and p.Character then
 			local upperTorso = p.Character:FindFirstChild("UpperTorso")
 			if upperTorso then table.insert(targets, upperTorso) end
 		end
@@ -1835,6 +1892,19 @@ local function killAll()
 	for _, upperTorso in ipairs(targets) do
 		handleTouched:FireServer(upperTorso)
 	end
+	
+	-- Instantly teleport to safety platform after kill all
+	pcall(function()
+		local character, rootPart = getCharacterParts()
+		if rootPart then
+			isScriptTeleporting = true
+			rootPart.Anchored = false
+			rootPart.CFrame = CFrame.new(99999, 99999 + 1.2, 99999)
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			task.delay(0.2, function() isScriptTeleporting = false end)
+		end
+	end)
 end
 
 -- Auto Vote Task
@@ -1903,14 +1973,15 @@ task.spawn(function()
 					wasVotingActive = true
 					local target = pickSmallest(open)
 					if target and target.trigger and target.trigger.Parent then
-						local char = LocalPlayer.Character
+						local char = localPlayer.Character
 						local hum = char and char:FindFirstChildOfClass("Humanoid")
 						local hrp = hum and hum.RootPart
 						if hrp and hum.Health > 0 and char ~= votedChar then
 							isCurrentlyVoting = true
 							isScriptTeleporting = true
 							hrp.Anchored = false
-							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
+							-- TP -2.5 studs down to reliably hit vote pad
+							local safePos = target.trigger.Position + Vector3.new(0, -2.5, 0)
 							hrp.CFrame = CFrame.new(safePos)
 							lastPosition = hrp.Position
 							if firetouchinterest then
@@ -1944,6 +2015,39 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------
+-- EXTERNAL TELEPORT DETECTION & PLATFORM SNAPBACK
+--------------------------------------------------------
+local lastDetectedPosition = nil
+
+task.spawn(function()
+	while true do
+		task.wait(0.05)
+		pcall(function()
+			local character, rootPart, humanoid = getCharacterParts()
+			if character and rootPart and humanoid and humanoid.Health > 0 then
+				local currentPos = rootPart.Position
+				
+				if lastDetectedPosition then
+					local distanceMoved = (currentPos - lastDetectedPosition).Magnitude
+					if distanceMoved > 35 then
+						if isScriptTeleporting or isBotTeleporting or isWaitingAfterVote or isWaitingAfterRespawn or isBagFull or isCurrentlyVoting or isAutoVoteActive or (getOpenPads() and #getOpenPads() > 0) then
+							-- Ignore script-driven, voting, or respawn timer teleports entirely
+						else
+							-- Game teleported you! Instantly teleport onto the safe platform surface at (99999, 99999 + 1.2, 99999)
+							rootPart.CFrame = CFrame.new(99999, 99999 + 1.2, 99999)
+							rootPart.AssemblyLinearVelocity = Vector3.zero
+							rootPart.AssemblyAngularVelocity = Vector3.zero
+						end
+					end
+				end
+				
+				lastDetectedPosition = rootPart.Position
+			end
+		end)
+	end
+end)
+
+--------------------------------------------------------
 -- MAIN HEARTBEAT AUTOMATION LOOP
 --------------------------------------------------------
 RunService.Heartbeat:Connect(function(dt)
@@ -1960,20 +2064,17 @@ RunService.Heartbeat:Connect(function(dt)
 
 	if isAutoGrabGunActive and not hasGun() and not hasKnife() and rootPart then
 		pcall(function()
-			for _, map in ipairs(Workspace:GetChildren()) do
-				local gunDrop = map:FindFirstChild("GunDrop", true)
-				if gunDrop then
-					local targetPart = nil
-					if gunDrop:IsA("BasePart") then
-						targetPart = gunDrop
-					elseif gunDrop:IsA("Model") then
-						targetPart = gunDrop.PrimaryPart or gunDrop:FindFirstChildWhichIsA("BasePart", true)
-					end
-					
-					if targetPart then
-						targetPart.CFrame = rootPart.CFrame
-						break
-					end
+			local gunDrop = Workspace:FindFirstChild("GunDrop", true)
+			if gunDrop then
+				local targetPart = nil
+				if gunDrop:IsA("BasePart") then
+					targetPart = gunDrop
+				elseif gunDrop:IsA("Model") then
+					targetPart = gunDrop.PrimaryPart or gunDrop:FindFirstChildWhichIsA("BasePart", true)
+				end
+				
+				if targetPart then
+					targetPart.CFrame = rootPart.CFrame
 				end
 			end
 		end)
@@ -1988,18 +2089,50 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- Handle 18-Second Wait After Voting, then TP to Safe Place
+	-- Count active un-faded coins
+	local activeCoinCount = 0
+	for _, part in ipairs(allDescendants) do
+		if not isCoinFading(part) then
+			activeCoinCount = activeCoinCount + 1
+		end
+	end
+
+	if activeCoinCount >= 3 and lastActiveCoinCount < 3 then
+		hasInstantTeleportedThisSpawn = false
+		coinsThisSpawn = 0
+	end
+	lastActiveCoinCount = activeCoinCount
+
+	-- Handle 18-Second Wait After Respawn, then TP to Safe Platform Surface (99999, 99999 + 1.2, 99999)
+	if isWaitingAfterRespawn and rootPart and humanoid then
+		local elapsedRespawn = tick() - respawnTimerStartTime
+		if elapsedRespawn >= 18 then
+			isWaitingAfterRespawn = false
+			isScriptTeleporting = true
+			rootPart.Anchored = false
+			rootPart.CFrame = CFrame.new(99999, 99999 + 1.2, 99999)
+			lastPosition = rootPart.Position
+			task.delay(0.2, function() isScriptTeleporting = false end)
+		else
+			rootPart.Anchored = false
+			humanoid.PlatformStand = false
+			return
+		end
+	end
+
+	-- Handle 18-Second Wait After Voting, then TP to Safe Platform Surface (99999, 99999 + 1.2, 99999)
 	if isWaitingAfterVote and rootPart and humanoid then
 		local elapsedPostVote = tick() - postVoteStartTime
 		if elapsedPostVote >= 18 then
 			isWaitingAfterVote = false
+			isScriptTeleporting = true
 			rootPart.Anchored = false
-			rootPart.CFrame = CFrame.new(610, 562, 60)
+			rootPart.CFrame = CFrame.new(99999, 99999 + 1.2, 99999)
 			lastPosition = rootPart.Position
+			task.delay(0.2, function() isScriptTeleporting = false end)
 		else
-			rootPart.Anchored = true
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			rootPart.Anchored = false
+			humanoid.PlatformStand = false
 			return
 		end
 	end
@@ -2098,16 +2231,31 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	if not isFarmingActive then return end
+	if not isFarmingActive then
+		if rootPart and not isAutoVoteActive and not isCurrentlyVoting then
+			rootPart.Anchored = false
+			if humanoid then humanoid.PlatformStand = false end
+		end
+		return
+	end
+
+	if activeCoinCount < 3 then
+		if rootPart and not isAutoVoteActive and not isCurrentlyVoting then
+			rootPart.Anchored = false
+			if humanoid then 
+				humanoid.PlatformStand = false 
+			end
+		end
+		return
+	end
+
 	if not character or not rootPart or not humanoid or humanoid.Health > 0 == false then
 		return
 	end
 
 	local unvisitedCount = 0
-	local activeCoinCount = 0
 	for _, part in ipairs(allDescendants) do
 		if not isCoinFading(part) then
-			activeCoinCount = activeCoinCount + 1
 			if not visitedCoins[part] then 
 				unvisitedCount = unvisitedCount + 1 
 			end
@@ -2120,7 +2268,7 @@ RunService.Heartbeat:Connect(function(dt)
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
-		-- ==================== FULL BAG ACTIONS (LOOPING RESET) ====================
+		-- ==================== FULL BAG ACTIONS (INSTANT EXECUTION) ====================
 		if not hasHandledFullBag then
 			hasHandledFullBag = true
 
@@ -2130,8 +2278,6 @@ RunService.Heartbeat:Connect(function(dt)
 
 			if humanoid then
 				humanoid.PlatformStand = false
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 			end
 			
@@ -2142,18 +2288,23 @@ RunService.Heartbeat:Connect(function(dt)
 			if hasKnife() and isAutoKillAllActive then
 				pcall(killAll)
 			elseif hasGun() then
-				-- Sheriff with gun handles automated actions
+				isScriptTeleporting = true
+				rootPart.CFrame = CFrame.new(99999, 99999 + 1.2, 99999)
+				lastPosition = rootPart.Position
+				task.delay(0.2, function() isScriptTeleporting = false end)
 			else
-				-- Innocent: Loop resetPlayer on the murderer until bags clear/reset finishes
 				task.spawn(function()
 					while isBagFull and isFarmingActive do
 						local murd = getMurd()
 						if murd then
+							isScriptTeleporting = true
 							pcall(function()
 								resetPlayer(murd)
 							end)
+							task.wait(0.05)
+							isScriptTeleporting = false
 						end
-						task.wait(1.2)
+						task.wait(0.2)
 					end
 				end)
 			end
@@ -2225,8 +2376,6 @@ RunService.Heartbeat:Connect(function(dt)
 		local currentPosition = rootPart.Position
 		local distance = (targetPosition - currentPosition).Magnitude
 
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
 		if currentFarmType == "Standing" or currentFarmType == "Lay on back" then
 			humanoid.PlatformStand = true
 			for _, desc in ipairs(character:GetDescendants()) do
@@ -2236,15 +2385,20 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 		end
 
-		if distance >= 500 then
-			isScriptTeleporting = true
-			if currentFarmType == "Lay on back" then
-				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, math.rad(90))
-			else
-				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, 0, 0)
+		-- Strict Single Instant Teleport Only ONCE per Spawn Batch (Only if distance is 500+ studs away)
+		if not hasInstantTeleportedThisSpawn then
+			hasInstantTeleportedThisSpawn = true
+			if distance >= 500 then
+				isScriptTeleporting = true
+				rootPart.Anchored = false
+				if currentFarmType == "Lay on back" then
+					rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(math.rad(90), 0, math.rad(90))
+				else
+					rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, 0, 0)
+				end
+				lastPosition = rootPart.Position
+				task.delay(0.2, function() isScriptTeleporting = false end)
 			end
-			lastPosition = rootPart.Position
-			task.delay(0.2, function() isScriptTeleporting = false end)
 		else
 			local direction = targetPosition - currentPosition
 			rootPart.AssemblyLinearVelocity = direction.Unit * speed
@@ -2264,8 +2418,11 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	else
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		rootPart.Anchored = false
-		lastPosition = rootPart.Position
+		if not isAutoVoteActive and not isCurrentlyVoting then
+			rootPart.Anchored = false
+			if humanoid then 
+				humanoid.PlatformStand = false 
+			end
+		end
 	end
 end)
