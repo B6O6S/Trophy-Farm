@@ -88,25 +88,18 @@ if currentFarmType == "Running" then
 end
 
 local isBagFull = false
-local hasTeleportedToSafeZone = false
+local hasHandledFullBag = false
 local coinsThisSpawn = 0
 
--- Safe Zone Hold State Variables (No Reset)
-local safeZoneTimer = 0
-local HOLD_SAFEZONE_TIME = 3
-
--- Voting State Flag
+-- Voting & Post-Vote Timer State Flags
 local isCurrentlyVoting = false
+local wasVotingActive = false
+local isWaitingAfterVote = false
+local postVoteStartTime = 0
+
 local isScriptTeleporting = false
 local lastPosition = Vector3.new(0, 0, 0)
 local isBotTeleporting = false
-local isShootingActive = false
-
--- Reset Player / Fling Variables
-local lastResetAttempt = 0
-local RESET_COORDINATE_COOLDOWN = 0.5
-local customResetDuration = 1
-local resetStartStuds = 5
 
 -- Coins Per Hour & Performance Tracker Variables
 local farmStartTime = nil
@@ -146,10 +139,12 @@ end
 -- Reset State On Respawn
 local function onCharacterAdded(char)
 	isBagFull = false
-	hasTeleportedToSafeZone = false
+	hasHandledFullBag = false
 	coinsThisSpawn = 0
-	safeZoneTimer = 0
 	isCurrentlyVoting = false
+	wasVotingActive = false
+	isWaitingAfterVote = false
+	postVoteStartTime = 0
 	isScriptTeleporting = false
 	isBotTeleporting = false
 	visitedCoins = {}
@@ -160,7 +155,6 @@ local function onCharacterAdded(char)
 		lastPosition = hrp.Position
 	end
 	
-	-- Restore camera subject
 	pcall(function()
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then Camera.CameraSubject = hum end
@@ -169,30 +163,51 @@ end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- ==================== ANTI-FLING IMPLEMENTATION ====================
+-- ==================== ANTI VOID IMPLEMENTATION ====================
+local function applyAntiVoid(enable)
+	pcall(function()
+		if enable then
+			Workspace.FallenPartsDestroyHeight = 0/0
+		else
+			Workspace.FallenPartsDestroyHeight = -500
+		end
+	end)
+end
+
+applyAntiVoid(isAntiVoidActive)
+
+-- ==================== FULL BAG REMOTE LISTENER ====================
+task.spawn(function()
+	pcall(function()
+		local CoinCollected = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Gameplay"):WaitForChild("CoinCollected")
+		CoinCollected.OnClientEvent:Connect(function(_, currentCoins, maxCoins)
+			if currentCoins and maxCoins and currentCoins >= maxCoins then
+				isBagFull = true
+			end
+		end)
+	end)
+end)
+
+-- ==================== ANTI-FLING (OPTIMIZED NOCLIP - NO LAG) ====================
 local function SetupAntiFling()
-    local LastPosition = nil
     RunService.Heartbeat:Connect(function()
         if not isAntiFlingActive then return end
         pcall(function()
             local Character = LocalPlayer.Character
             if not Character then return end
             
-            local PrimaryPart = Character.PrimaryPart
-            if not PrimaryPart then return end
+            local myHrp = Character:FindFirstChild("HumanoidRootPart")
+            if not myHrp then return end
 
-            local linVel = PrimaryPart.AssemblyLinearVelocity.Magnitude
-            local angVel = PrimaryPart.AssemblyAngularVelocity.Magnitude
-
-            if linVel > 250 or angVel > 250 then
-                PrimaryPart.AssemblyAngularVelocity = Vector3.zero
-                PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-                if LastPosition then
-                    PrimaryPart.CFrame = LastPosition
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                    if pRoot then
+                        pRoot.CanCollide = false
+                    end
                 end
-            elseif linVel < 50 and angVel < 50 then
-                LastPosition = PrimaryPart.CFrame
             end
+            myHrp.CanCollide = false
         end)
     end)
 end
@@ -246,21 +261,6 @@ local function setupAutoRejoin()
 end
 
 setupAutoRejoin()
-
--- ==================== ANTI VOID HANDLER ====================
-local function applyAntiVoid(enable)
-	pcall(function()
-		if enable then
-			Workspace.FallenPartsDestroyHeight = 0/0
-		else
-			Workspace.FallenPartsDestroyHeight = -500
-		end
-	end)
-end
-
-if isAntiVoidActive then
-	applyAntiVoid(true)
-end
 
 -- ==================== SHOW COIN AURA BOX HANDLER ====================
 local function updateCoinAuraBox(enable)
@@ -421,7 +421,8 @@ end
 local function getCoinParts(containers)
 	local parts = {}
 	for _, container in ipairs(containers) do
-		for _, descendant in ipairs(container:GetDescendants()) do
+		local coinFolder = container:FindFirstChild("CoinFolder") or container
+		for _, descendant in ipairs(coinFolder:GetDescendants()) do
 			if descendant:IsA("BasePart") and descendant:FindFirstChild("TouchInterest") then
 				table.insert(parts, descendant)
 			end
@@ -482,6 +483,10 @@ local function hasKnife()
 	return getKnife() ~= nil
 end
 
+local function hasWeapon()
+	return hasGun() or hasKnife()
+end
+
 local function equipKnife()
 	local knife = getKnife()
 	if not knife then return false end
@@ -513,6 +518,79 @@ local function getMurd()
 		end
 	end
 	return nil
+end
+
+--------------------------------------------------------
+-- CUSTOM INNOCENT FLING METHOD (RESET PLAYER LOOP)
+--------------------------------------------------------
+local function resetPlayer(TargetPlayer)
+    if not TargetPlayer or TargetPlayer == LocalPlayer then return end
+
+    local Character = LocalPlayer.Character
+    if not Character then return end
+
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Character:FindFirstChild("HumanoidRootPart")
+    local TCharacter = TargetPlayer.Character
+
+    if not (Humanoid and RootPart and TCharacter) then return end
+
+    local TRootPart = TCharacter:FindFirstChild("HumanoidRootPart")
+    local THead = TCharacter:FindFirstChild("Head")
+
+    if not TRootPart then return end
+
+    local savedCFrame = RootPart.CFrame
+
+    Humanoid.PlatformStand = true
+
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    bv.Velocity = Vector3.new(0, -50000, 0)
+    bv.Parent = RootPart
+
+    local bg = Instance.new("BodyGyro")
+    bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    bg.P = 1000000
+    bg.Parent = RootPart
+
+    local startTime = tick()
+    local randomAngVel = Vector3.new(5000, 8000, 6000)
+
+    local connection
+    connection = RunService.Heartbeat:Connect(function()
+        if tick() - startTime > 1.2
+            or not TargetPlayer.Character
+            or not TRootPart.Parent 
+            or not isBagFull then
+
+            if bv.Parent then bv:Destroy() end
+            if bg.Parent then bg:Destroy() end
+
+            Humanoid.PlatformStand = false
+            RootPart.AssemblyLinearVelocity = Vector3.zero
+            RootPart.AssemblyAngularVelocity = Vector3.zero
+            RootPart.CFrame = savedCFrame
+
+            Humanoid:ChangeState(
+                Enum.HumanoidStateType.GettingUp
+            )
+
+            connection:Disconnect()
+            return
+        end
+
+        local targetPos = THead and THead.Position or TRootPart.Position
+
+        RootPart.CFrame =
+            CFrame.new(targetPos) *
+            CFrame.Angles(math.random(), math.random(), 0)
+
+        RootPart.AssemblyLinearVelocity =
+            Vector3.new(math.random(-500, 500), -50000, math.random(-500, 500))
+
+        RootPart.AssemblyAngularVelocity = randomAngVel
+    end)
 end
 
 --------------------------------------------------------
@@ -807,7 +885,7 @@ task.spawn(function()
 	settingsScroll.Position = UDim2.new(0, 5, 0, 68)
 	settingsScroll.BackgroundTransparency = 1
 	settingsScroll.BorderSizePixel = 0
-	settingsScroll.CanvasSize = UDim2.new(0, 0, 0, 150)
+	settingsScroll.CanvasSize = UDim2.new(0, 0, 0, 180)
 	settingsScroll.ScrollBarThickness = 2
 	settingsScroll.Visible = false
 	settingsScroll.Parent = mainFrame
@@ -1218,8 +1296,8 @@ task.spawn(function()
 
 	createHeaderLabel(settingsScroll, "SETTINGS:", 0)
 	local antiFlingBtn = createButton(settingsScroll, "Anti Fling", 25, isAntiFlingActive)
-	local antiAFKBtn = createButton(settingsScroll, "Anti AFK", 55, isAntiAFKActive)
-	local antiVoidBtn = createButton(settingsScroll, "Anti Void", 85, isAntiVoidActive)
+	local antiVoidBtn = createButton(settingsScroll, "Anti Void / Destroy Void", 55, isAntiVoidActive)
+	local antiAFKBtn = createButton(settingsScroll, "Anti AFK", 85, isAntiAFKActive)
 	local rejoinBtn = createButton(settingsScroll, "Auto Rejoin", 115, isAutoRejoinActive)
 
 	antiFlingBtn.MouseButton1Click:Connect(function()
@@ -1229,19 +1307,19 @@ task.spawn(function()
 		updateToggleVisual(antiFlingBtn, isAntiFlingActive, "Anti Fling")
 	end)
 
+	antiVoidBtn.MouseButton1Click:Connect(function()
+		isAntiVoidActive = not isAntiVoidActive
+		settingsData.AntiVoid = isAntiVoidActive
+		saveSettings()
+		updateToggleVisual(antiVoidBtn, isAntiVoidActive, "Anti Void / Destroy Void")
+		applyAntiVoid(isAntiVoidActive)
+	end)
+
 	antiAFKBtn.MouseButton1Click:Connect(function()
 		isAntiAFKActive = not isAntiAFKActive
 		settingsData.AntiAFK = isAntiAFKActive
 		saveSettings()
 		updateToggleVisual(antiAFKBtn, isAntiAFKActive, "Anti AFK")
-	end)
-
-	antiVoidBtn.MouseButton1Click:Connect(function()
-		isAntiVoidActive = not isAntiVoidActive
-		settingsData.AntiVoid = isAntiVoidActive
-		saveSettings()
-		updateToggleVisual(antiVoidBtn, isAntiVoidActive, "Anti Void")
-		applyAntiVoid(isAntiVoidActive)
 	end)
 
 	rejoinBtn.MouseButton1Click:Connect(function()
@@ -1324,9 +1402,11 @@ task.spawn(function()
 			coinsCollectedSession = 0
 			coinsThisSpawn = 0
 			isBagFull = false
-			hasTeleportedToSafeZone = false
-			safeZoneTimer = 0
+			hasHandledFullBag = false
 			isCurrentlyVoting = false
+			wasVotingActive = false
+			isWaitingAfterVote = false
+			postVoteStartTime = 0
 			isScriptTeleporting = false
 			trackedPickupCoins = {}
 			if rootPart then lastPosition = rootPart.Position end
@@ -1338,14 +1418,19 @@ task.spawn(function()
 			if statusLabel then statusLabel.Text = "Status: Idle / Ready" end
 			visitedCoins = {}
 			isBagFull = false
-			hasTeleportedToSafeZone = false
+			hasHandledFullBag = false
 			coinsThisSpawn = 0
-			safeZoneTimer = 0
 			isCurrentlyVoting = false
+			wasVotingActive = false
+			isWaitingAfterVote = false
+			postVoteStartTime = 0
 			isScriptTeleporting = false
 			if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 			if rootPart then
 				rootPart.Anchored = false
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then part.CanCollide = true end
+				end
 			end
 			if humanoid then
 				humanoid.PlatformStand = false
@@ -1547,7 +1632,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 --------------------------------------------------------
--- ADVANCED PREDICTIVE SHOOTING & TARGETING (SAFE ZONE TP + JUMP)
+-- ADVANCED PREDICTIVE SHOOTING & TARGETING
 --------------------------------------------------------
 local motionPart, motionPosition, motionTime
 local measuredVelocity = Vector3.zero
@@ -1618,10 +1703,8 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 
 		if not targetPart or not camera or not character or not humanoid or not rootPart then return end
 
-		-- Only shoot & teleport when bag is full (or farming is not active)
 		if isFarmingActive and not isBagFull then return end
 
-		-- Check if player has the gun
 		local gun = character:FindFirstChild("Gun") or character:FindFirstChild("Revolver")
 		if not gun and backpack then
 			gun = backpack:FindFirstChild("Gun") or backpack:FindFirstChild("Revolver")
@@ -1631,17 +1714,14 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 
 		rootPart.Anchored = false
 		
-		-- Teleport to the safe zone when bag is full
 		rootPart.CFrame = CFrame.new(610, 562, 60)
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
 
-		-- Force jump once upon teleporting to prevent ragdolling
 		humanoid.PlatformStand = false
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 
-		-- Spectate Murderer automatically
 		if murdPlayer and murdPlayer.Character then
 			local murdHum = murdPlayer.Character:FindFirstChildOfClass("Humanoid")
 			if murdHum then
@@ -1757,138 +1837,6 @@ local function killAll()
 	end
 end
 
-local function isWhitelisted(player)
-	return false
-end
-
-local function setRootReference(root, targetRoot)
-end
-
-local function clearRootReference(root)
-end
-
-local function fullyRestoreCharacter(character, savedData)
-	pcall(function()
-		local hum = character:FindFirstChildOfClass("Humanoid")
-		local hrp = character:FindFirstChild("HumanoidRootPart")
-		if hum then hum.PlatformStand = false end
-		if hrp and savedData and savedData.cframe then
-			hrp.CFrame = savedData.cframe
-		end
-	end)
-end
-
-local function resetPlayer(TargetPlayer)
-    if not TargetPlayer then return false end
-    if tick() - lastResetAttempt < RESET_COORDINATE_COOLDOWN then return false end
-    if isWhitelisted(TargetPlayer) then return false end
-    if TargetPlayer == LocalPlayer then return false end
-    
-    lastResetAttempt = tick()
-    
-    local Character = LocalPlayer.Character
-    if not Character then return false end
-    
-    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    local RootPart = Humanoid and Humanoid.RootPart
-    local TCharacter = TargetPlayer.Character
-    
-    if not (Character and Humanoid and RootPart and TCharacter) then return false end
-    
-    local TRootPart = TCharacter:FindFirstChild("HumanoidRootPart")
-    local THead = TCharacter:FindFirstChild("Head")
-    if not TRootPart then return false end
-    
-    local savedData = { cframe = RootPart.CFrame }
-    Humanoid.PlatformStand = true
-    
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bv.Velocity = Vector3.new(0, -50000, 0)
-    bv.Parent = RootPart
-    
-    local bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    bg.P = 1000000
-    bg.Parent = RootPart
-    
-    local previousDestroyHeight = Workspace.FallenPartsDestroyHeight
-    Workspace.FallenPartsDestroyHeight = 0/0
-    
-    local startTime = tick()
-    local resetDuration = tonumber(customResetDuration) or 1
-    if resetDuration <= 0 then resetDuration = 0.1 end
-    
-    local startStuds = tonumber(resetStartStuds)
-    if not startStuds then startStuds = 5 end
-    
-    local completed = false
-    local conn
-    
-    conn = RunService.Heartbeat:Connect(function()
-        if tick() - startTime > resetDuration or not TargetPlayer.Character or not TRootPart.Parent then
-            Workspace.FallenPartsDestroyHeight = previousDestroyHeight
-            if bv.Parent then bv:Destroy() end
-            if bg.Parent then bg:Destroy() end
-            clearRootReference(RootPart)
-            fullyRestoreCharacter(Character, savedData)
-            if conn then conn:Disconnect() end
-            completed = true
-            return
-        end
-        
-        if TRootPart and TRootPart.Parent and Character and Character.Parent then
-            local targetPos = THead and THead.Position or (TRootPart.Position + Vector3.new(0, startStuds, 0))
-            RootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.pi / 2, 0, 0)
-            RootPart.AssemblyLinearVelocity = Vector3.new(0, -50000, 0)
-            RootPart.AssemblyAngularVelocity = Vector3.new(7500, 7500, 7500)
-            
-            for i = 1, 5 do
-                touch(RootPart, TRootPart)
-                if THead then
-                    touch(RootPart, THead)
-                end
-            end
-            
-            setRootReference(RootPart, TRootPart)
-        end
-    end)
-    
-    while not completed and TargetPlayer.Parent and isAutoFlingMurdererActive do
-        task.wait(0.05)
-    end
-    
-    if not completed then
-        Workspace.FallenPartsDestroyHeight = previousDestroyHeight
-        if bv.Parent then bv:Destroy() end
-        if bg.Parent then bg:Destroy() end
-        clearRootReference(RootPart)
-        fullyRestoreCharacter(Character, savedData)
-        if conn then conn:Disconnect() end
-    end
-    
-    return true
-end
-
-local function flingMurd()
-	while isAutoFlingMurdererActive do
-		if not (isFarmingActive and not isBagFull) then
-			local murd = getMurd()
-			if murd and murd.Character then
-				local hum = murd.Character:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0 then
-					resetPlayer(murd)
-				else
-					break
-				end
-			else
-				break
-			end
-		end
-		task.wait(0.1)
-	end
-end
-
 -- Auto Vote Task
 local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
 local ORDER = { 
@@ -1952,6 +1900,7 @@ task.spawn(function()
 			pcall(function()
 				local open = getOpenPads()
 				if #open > 0 then
+					wasVotingActive = true
 					local target = pickSmallest(open)
 					if target and target.trigger and target.trigger.Parent then
 						local char = LocalPlayer.Character
@@ -1980,10 +1929,16 @@ task.spawn(function()
 				else
 					votedChar = nil
 					isCurrentlyVoting = false
+					if wasVotingActive then
+						wasVotingActive = false
+						isWaitingAfterVote = true
+						postVoteStartTime = tick()
+					end
 				end
 			end)
 		else
 			isCurrentlyVoting = false
+			wasVotingActive = false
 		end
 	end
 end)
@@ -1993,6 +1948,15 @@ end)
 --------------------------------------------------------
 RunService.Heartbeat:Connect(function(dt)
 	local character, rootPart, humanoid = getCharacterParts()
+
+	-- Enable Noclip on character parts when Auto Farm is active
+	if isFarmingActive and character then
+		for _, part in ipairs(character:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+			end
+		end
+	end
 
 	if isAutoGrabGunActive and not hasGun() and not hasKnife() and rootPart then
 		pcall(function()
@@ -2021,6 +1985,22 @@ RunService.Heartbeat:Connect(function(dt)
 		local coinFolder = container:FindFirstChild("CoinFolder") or container
 		for _, desc in ipairs(coinFolder:GetDescendants()) do
 			if isTargetCoin(desc) then table.insert(allDescendants, desc) end
+		end
+	end
+
+	-- Handle 18-Second Wait After Voting, then TP to Safe Place
+	if isWaitingAfterVote and rootPart and humanoid then
+		local elapsedPostVote = tick() - postVoteStartTime
+		if elapsedPostVote >= 18 then
+			isWaitingAfterVote = false
+			rootPart.Anchored = false
+			rootPart.CFrame = CFrame.new(610, 562, 60)
+			lastPosition = rootPart.Position
+		else
+			rootPart.Anchored = true
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			return
 		end
 	end
 
@@ -2123,10 +2103,6 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 
-	for _, part in ipairs(character:GetDescendants()) do
-		if part:IsA("BasePart") then part.CanCollide = false end
-	end
-
 	local unvisitedCount = 0
 	local activeCoinCount = 0
 	for _, part in ipairs(allDescendants) do
@@ -2140,70 +2116,50 @@ RunService.Heartbeat:Connect(function(dt)
 
 	if unvisitedCount == 0 then visitedCoins = {} end
 
-	if not isBagFull and activeCoinCount == 0 and coinsThisSpawn > 0 then
-		isBagFull = true
-	end
-
 	if isBagFull then
 		visitedCoins = {}
 		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
 		
-		if hasKnife() and isAutoKillAllActive then
-			pcall(killAll)
-		elseif not hasWeapon() and isAutoFlingMurdererActive then
-			pcall(flingMurd)
-		end
+		-- ==================== FULL BAG ACTIONS (LOOPING RESET) ====================
+		if not hasHandledFullBag then
+			hasHandledFullBag = true
 
-		if not isShootMurdererActive then
-			if not hasTeleportedToSafeZone then
-				isScriptTeleporting = true
-				rootPart.AssemblyLinearVelocity = Vector3.zero
-				rootPart.AssemblyAngularVelocity = Vector3.zero
-				rootPart.Anchored = false
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			rootPart.Anchored = false
 
-				if humanoid then
-					humanoid.PlatformStand = false
-					humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-					humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-					humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-				end
-				
-				if character then
-					for _, part in ipairs(character:GetDescendants()) do
-						if part:IsA("BasePart") then
-							part.CanCollide = true
-						end
-					end
-				end
-
-				rootPart.CFrame = CFrame.new(610, 562, 60)
-				
-				-- Jump once to prevent ragdolling
-				pcall(function()
-					humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-					humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-				end)
-
-				hasTeleportedToSafeZone = true
-				lastPosition = rootPart.Position
-				task.delay(0.2, function() isScriptTeleporting = false end)
+			if humanoid then
+				humanoid.PlatformStand = false
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+			end
+			
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then part.CanCollide = true end
 			end
 
-			safeZoneTimer = safeZoneTimer + dt
-
-			if safeZoneTimer >= HOLD_SAFEZONE_TIME then
-				safeZoneTimer = 0
-				coinsThisSpawn = 0
-				isBagFull = false
-				hasTeleportedToSafeZone = false
-				rootPart.AssemblyLinearVelocity = Vector3.zero
-				rootPart.Anchored = false
+			if hasKnife() and isAutoKillAllActive then
+				pcall(killAll)
+			elseif hasGun() then
+				-- Sheriff with gun handles automated actions
+			else
+				-- Innocent: Loop resetPlayer on the murderer until bags clear/reset finishes
+				task.spawn(function()
+					while isBagFull and isFarmingActive do
+						local murd = getMurd()
+						if murd then
+							pcall(function()
+								resetPlayer(murd)
+							end)
+						end
+						task.wait(1.2)
+					end
+				end)
 			end
 		end
 
 		return
-	else
-		hasTeleportedToSafeZone = false
 	end
 
 	local closestPart, closestCF = nil, nil
@@ -2227,8 +2183,21 @@ RunService.Heartbeat:Connect(function(dt)
 				local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
 				
 				local shouldSkip = false
-				if murdHrpPos and (targetPosWithOffset - murdHrpPos).Magnitude <= 15 then
-					shouldSkip = true
+				if murdHrpPos then
+					local distToMurd = (targetPosWithOffset - murdHrpPos).Magnitude
+					if distToMurd <= 22 then
+						shouldSkip = true
+					else
+						local toCoin = (targetPosWithOffset - rootPos).Unit
+						local toMurd = (murdHrpPos - rootPos)
+						local proj = toMurd:Dot(toCoin)
+						if proj > 0 and proj < (targetPosWithOffset - rootPos).Magnitude then
+							local closestPointOnPath = rootPos + (toCoin * proj)
+							if (closestPointOnPath - murdHrpPos).Magnitude < 18 then
+								shouldSkip = true
+							end
+						end
+					end
 				end
 
 				if not shouldSkip then
