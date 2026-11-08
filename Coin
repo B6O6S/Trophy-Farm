@@ -1033,7 +1033,7 @@ task.spawn(function()
 		roundTimerLabel.Text = string.format("Time: %ds", elapsed)
 		
 		if isBagFull or amount >= maximum then
-			candiesCountInsideLabel.Text = "Max"
+			candiesCountInsideLabel.Text = "Full"
 			bar.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
 		else
 			candiesCountInsideLabel.Text = amount .. " / " .. maximum
@@ -2067,6 +2067,7 @@ RunService.RenderStepped:Connect(function(dt)
 	local now = tick()
 	if now - lastStatsUpdate >= 0.5 then
 		lastStatsUpdate = now
+		serverJoinTime = serverJoinTime or now
 		local serverElapsed = now - serverJoinTime
 		if serverTimerLabel then
 			serverTimerLabel.Text = "Server Uptime: " .. formatDuration(serverElapsed)
@@ -2253,7 +2254,7 @@ task.spawn(function()
 	end
 end)
 
--- Auto Vote Task (Excludes "Barn")
+-- Optimized Auto Vote Task (Throttled & Non-Laggy with Tiny Register Wait)
 local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
 local ORDER = { 
 	"Manor", "House 2", "Office 3", "Hospital 3", "Bank 2", 
@@ -2316,7 +2317,7 @@ end
 
 task.spawn(function()
 	while true do
-		task.wait(0.5)
+		task.wait(1.0) -- Throttled check interval to prevent loop lag
 		if isAutoVoteActive then
 			pcall(function()
 				local open = getOpenPads()
@@ -2338,7 +2339,10 @@ task.spawn(function()
 								pcall(firetouchinterest, hrp, target.trigger, 0)
 								pcall(firetouchinterest, hrp, target.trigger, 1)
 							end
-							task.wait(0.12)
+							
+							-- Wait a tiny bit (0.25s) to guarantee the vote server-registers before resetting
+							task.wait(0.25)
+							
 							if hum and hum.Health > 0 then
 								votedChar = char
 								hum:ChangeState(Enum.HumanoidStateType.Dead)
@@ -2773,7 +2777,6 @@ RunService.Heartbeat:Connect(function(dt)
 			else
 				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, 0, 0)
 			end
-			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 			lastPosition = rootPart.Position
 		else
 			local direction = targetPosition - currentPosition
@@ -2790,7 +2793,6 @@ RunService.Heartbeat:Connect(function(dt)
 				rootPart.CFrame = CFrame.new(currentPos.X, currentPos.Y, currentPos.Z) * CFrame.Angles(0, 0, 0)
 			end
 			
-			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 			lastPosition = rootPart.Position
 
 			if distance <= 4.0 then
