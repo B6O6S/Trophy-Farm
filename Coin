@@ -30,6 +30,7 @@ local settingsData = {
 	CoinAura = false,
 	AvoidMurderer = false,
 	AutoFlingMurderer = false,
+	AutoFlingSheriff = false,
 	ShootMurderer = false,
 	AutoKillAll = false,
 	AutoGrabGun = false,
@@ -71,6 +72,7 @@ local isAutoVoteActive = settingsData.AutoVote
 local isCoinAuraActive = settingsData.CoinAura
 local isAvoidMurdererActive = settingsData.AvoidMurderer
 local isAutoFlingMurdererActive = settingsData.AutoFlingMurderer
+local isAutoFlingSheriffActive = settingsData.AutoFlingSheriff
 local isShootMurdererActive = settingsData.ShootMurderer
 local isAutoKillAllActive = settingsData.AutoKillAll
 local isAutoGrabGunActive = settingsData.AutoGrabGun
@@ -586,6 +588,26 @@ local function getMurd()
 	return foundMurd
 end
 
+local function getSheriff()
+	local foundSheriff = nil
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= localPlayer then
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local isAlive = not hum or hum.Health > 0
+			if isAlive and ((plr.Backpack and (plr.Backpack:FindFirstChild("Gun") or plr.Backpack:FindFirstChild("Revolver"))) or (char and (char:FindFirstChild("Gun") or char:FindFirstChild("Revolver")))) then
+				foundSheriff = plr
+				break
+			end
+		end
+	end
+	return foundSheriff
+end
+
+local function isPlayerInnocent()
+	return not hasGun() and not hasKnife()
+end
+
 --------------------------------------------------------
 -- ADVANCED PREDICTIVE SHOOTING & TARGETING
 --------------------------------------------------------
@@ -698,7 +720,7 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 end
 
 --------------------------------------------------------
--- AUTO FLING MURDERER ROUTINE
+-- AUTO FLING MURDERER & SHERIFF ROUTINES
 --------------------------------------------------------
 local function flingMurdererRoutine()
 	if not isAutoFlingMurdererActive or not isBagFull then return end
@@ -727,6 +749,42 @@ local function flingMurdererRoutine()
 	local startTime = tick()
 	while isAutoFlingMurdererActive and isBagFull and tick() - startTime < 0.8 and murd.Character and mRoot and rootPart do
 		rootPart.CFrame = mRoot.CFrame * CFrame.new(0, 1, 0)
+		rootPart.AssemblyAngularVelocity = Vector3.new(99999, 99999, 99999)
+		task.wait()
+	end
+
+	if bv.Parent then bv:Destroy() end
+	humanoid.PlatformStand = false
+	pcall(function()
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		rootPart.CFrame = CFrame.new(550, 200 + 2.5, 38)
+	end)
+	task.delay(0.2, function() isScriptTeleporting = false end)
+end
+
+local function flingSheriffRoutine()
+	if not isAutoFlingSheriffActive or not isBagFull or not isPlayerInnocent() then return end
+	local sheriff = getSheriff()
+	if not sheriff or not sheriff.Character then return end
+
+	local sRoot = sheriff.Character:FindFirstChild("HumanoidRootPart")
+	local char = localPlayer.Character
+	local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	if not sRoot or not rootPart or not humanoid then return end
+
+	isScriptTeleporting = true
+	humanoid.PlatformStand = true
+
+	local bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	bv.Velocity = Vector3.new(0, 30000, 0)
+	bv.Parent = rootPart
+
+	local startTime = tick()
+	while isAutoFlingSheriffActive and isBagFull and isPlayerInnocent() and tick() - startTime < 0.8 and sheriff.Character and sRoot and rootPart do
+		rootPart.CFrame = sRoot.CFrame * CFrame.new(0, 1, 0)
 		rootPart.AssemblyAngularVelocity = Vector3.new(99999, 99999, 99999)
 		task.wait()
 	end
@@ -1252,7 +1310,7 @@ task.spawn(function()
 	autoFarmScroll.Position = UDim2.new(0, 5, 0, 68)
 	autoFarmScroll.BackgroundTransparency = 1
 	autoFarmScroll.BorderSizePixel = 0
-	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 595)
+	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 630)
 	autoFarmScroll.ScrollBarThickness = 2
 	autoFarmScroll.Visible = true
 	autoFarmScroll.Parent = mainFrame
@@ -1701,7 +1759,23 @@ task.spawn(function()
 	innocentStroke1.Thickness = 1.5
 	innocentStroke1.Parent = innocentRoleLabel1
 
-	local shootBtn = createButton(autoFarmScroll, "Auto Shoot Murderer", 324, isShootMurdererActive)
+	local flingSheriffBtn = createButton(autoFarmScroll, "Auto Fling Sheriff", 324, isAutoFlingSheriffActive)
+	local innocentRoleLabel2 = Instance.new("TextLabel")
+	innocentRoleLabel2.Size = UDim2.new(0, 65, 1, 0)
+	innocentRoleLabel2.Position = UDim2.new(1, -69, 0, 0)
+	innocentRoleLabel2.BackgroundTransparency = 1
+	innocentRoleLabel2.Text = "[ Innocent ]"
+	innocentRoleLabel2.TextColor3 = Color3.fromRGB(0, 255, 0)
+	innocentRoleLabel2.TextSize = 9
+	innocentRoleLabel2.Font = Enum.Font.GothamBold
+	innocentRoleLabel2.TextXAlignment = Enum.TextXAlignment.Right
+	innocentRoleLabel2.Parent = flingSheriffBtn
+	local innocentStroke2 = Instance.new("UIStroke")
+	innocentStroke2.Color = Color3.fromRGB(0, 0, 0)
+	innocentStroke2.Thickness = 1.5
+	innocentStroke2.Parent = innocentRoleLabel2
+
+	local shootBtn = createButton(autoFarmScroll, "Auto Shoot Murderer", 352, isShootMurdererActive)
 	local sheriffRoleLabel = Instance.new("TextLabel")
 	sheriffRoleLabel.Size = UDim2.new(0, 60, 1, 0)
 	sheriffRoleLabel.Position = UDim2.new(1, -64, 0, 0)
@@ -1717,7 +1791,7 @@ task.spawn(function()
 	sheriffStroke.Thickness = 1.5
 	sheriffStroke.Parent = sheriffRoleLabel
 
-	local killBtn = createButton(autoFarmScroll, "Auto Kill All", 352, isAutoKillAllActive)
+	local killBtn = createButton(autoFarmScroll, "Auto Kill All", 380, isAutoKillAllActive)
 	local murdRoleLabel = Instance.new("TextLabel")
 	murdRoleLabel.Size = UDim2.new(0, 65, 1, 0)
 	murdRoleLabel.Position = UDim2.new(1, -69, 0, 0)
@@ -1733,12 +1807,12 @@ task.spawn(function()
 	murdStroke.Thickness = 1.5
 	murdStroke.Parent = murdRoleLabel
 
-	createHeaderLabel(autoFarmScroll, "CUSTOMIZATIONS:", 388)
-	local showCoinsBtn = createButton(autoFarmScroll, "Show Candies", 410, isShowCoinsActive)
-	local optimizedCoinsBtn = createButton(autoFarmScroll, "Optimize Candies", 438, isOptimizedCoinsActive)
-	local fpsBtn = createButton(autoFarmScroll, "FPS Boost", 466, isFpsBoosterActive)
-	local showCoinBoxBtn = createButton(autoFarmScroll, "Show Candy Aura Box", 494, isShowCoinAuraBoxActive)
-	local showTimerBtn = createButton(autoFarmScroll, "Timer", 522, isShowRoundTimerActive)
+	createHeaderLabel(autoFarmScroll, "CUSTOMIZATIONS:", 416)
+	local showCoinsBtn = createButton(autoFarmScroll, "Show Candies", 438, isShowCoinsActive)
+	local optimizedCoinsBtn = createButton(autoFarmScroll, "Optimize Candies", 466, isOptimizedCoinsActive)
+	local fpsBtn = createButton(autoFarmScroll, "FPS Boost", 494, isFpsBoosterActive)
+	local showCoinBoxBtn = createButton(autoFarmScroll, "Show Candy Aura Box", 522, isShowCoinAuraBoxActive)
+	local showTimerBtn = createButton(autoFarmScroll, "Timer", 550, isShowRoundTimerActive)
 
 	createHeaderLabel(settingsScroll, "SETTINGS:", 0)
 	local antiFlingBtn = createButton(settingsScroll, "Anti Fling", 25, isAntiFlingActive)
@@ -1907,6 +1981,13 @@ task.spawn(function()
 		settingsData.AutoFlingMurderer = isAutoFlingMurdererActive
 		saveSettings()
 		updateToggleVisual(flingMurdBtn, isAutoFlingMurdererActive, "Auto Fling Murderer")
+	end)
+
+	flingSheriffBtn.MouseButton1Click:Connect(function()
+		isAutoFlingSheriffActive = not isAutoFlingSheriffActive
+		settingsData.AutoFlingSheriff = isAutoFlingSheriffActive
+		saveSettings()
+		updateToggleVisual(flingSheriffBtn, isAutoFlingSheriffActive, "Auto Fling Sheriff")
 	end)
 
 	shootBtn.MouseButton1Click:Connect(function()
@@ -2462,6 +2543,10 @@ RunService.Heartbeat:Connect(function(dt)
 		task.spawn(flingMurdererRoutine)
 	end
 
+	if isAutoFlingSheriffActive and isFarmingActive and isBagFull and isPlayerInnocent() then
+		task.spawn(flingSheriffRoutine)
+	end
+
 	if activeCoinCount < 1 then
 		platformCoinDetectTime = nil
 		if rootPart and not isAutoVoteActive and not isCurrentlyVoting then
@@ -2511,7 +2596,6 @@ RunService.Heartbeat:Connect(function(dt)
 			rootPart.Anchored = false
 			if humanoid then humanoid.PlatformStand = false end
 		end
-		-- Even if Murderer or any role with full bag, ensure smooth return to platform
 		if isBagFull and isFarmingActive and rootPart then
 			if math.abs(rootPart.Position.X - 550) > 200 or math.abs(rootPart.Position.Y - 200) > 200 or math.abs(rootPart.Position.Z - 38) > 200 then
 				lastPlatformTeleportPos = rootPart.Position
@@ -2689,6 +2773,7 @@ RunService.Heartbeat:Connect(function(dt)
 			else
 				rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, 0, 0)
 			end
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 			lastPosition = rootPart.Position
 		else
 			local direction = targetPosition - currentPosition
@@ -2705,6 +2790,7 @@ RunService.Heartbeat:Connect(function(dt)
 				rootPart.CFrame = CFrame.new(currentPos.X, currentPos.Y, currentPos.Z) * CFrame.Angles(0, 0, 0)
 			end
 			
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 			lastPosition = rootPart.Position
 
 			if distance <= 4.0 then
