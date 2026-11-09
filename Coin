@@ -647,6 +647,7 @@ local function shootMurdererInstantly(targetPart, murdPlayer, currentPing, curre
 		rootPart.AssemblyAngularVelocity = Vector3.zero
 		task.delay(0.2, function() isScriptTeleporting = false end)
 
+		-- Spectate murderer ONLY if player actually has the gun
 		if hasGun() and murdPlayer and murdPlayer.Character then
 			local murdHum = murdPlayer.Character:FindFirstChildOfClass("Humanoid")
 			if murdHum then
@@ -885,7 +886,13 @@ task.spawn(function()
 
 	local function updateCandyUI(amount, maximum)
 		maximum = tonumber(maximum) or maxBagCapacity
-		amount = math.clamp(tonumber(amount) or 0, 0, maximum)
+		
+		-- Force displayed candies count to 0 if Optimized Coins is enabled
+		if isOptimizedCoinsActive then
+			amount = 0
+		else
+			amount = math.clamp(tonumber(amount) or 0, 0, maximum)
+		end
 		
 		if amount > 0 and not roundTimerStartTime and not isBagFull then
 			roundTimerStartTime = tick()
@@ -1968,7 +1975,8 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 
 		if sessionCandiesLabel and roundCandiesLabel then
-			roundCandiesLabel.Text = string.format("Round Candies: %d", candiesThisSpawn)
+			local displayedRoundCandies = isOptimizedCoinsActive and 0 or candiesThisSpawn
+			roundCandiesLabel.Text = string.format("Round Candies: %d", displayedRoundCandies)
 			if farmStartTime then
 				local elapsed = now - farmStartTime
 				if elapsed > 0 then
@@ -2490,33 +2498,49 @@ local function watchDeath(player)
     deathConnections[player.UserId.."_char"] = player.CharacterAdded:Connect(setupChar)
 end
 
--- Auto Reset Sheriff Loop
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if not isLocalMurderer() then
-            local target = findSheriffWithFallback()
-            if target then
-                if not flungTargets[target.UserId] then
+-- Helper function to check if any coins are currently detected/active on the map
+local function areCoinsDetected()
+	local containers = getCoinContainers()
+	for _, container in ipairs(containers) do
+		local coinFolder = container:FindFirstChild("CoinFolder") or container
+		for _, desc in ipairs(coinFolder:GetDescendants()) do
+			if isTargetCoin(desc) and not isCoinFading(desc) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Auto Reset Sheriff Routine: executes strictly 3 attempts and stops immediately if any coins are detected
+local function executeResetSheriffThreeAttempts()
+    if not isLocalMurderer() and isAutoFlingSheriffActive then
+		if areCoinsDetected() then return end
+        local target = findSheriffWithFallback()
+        if target and target.Character then
+            local hum = target.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                for attempt = 1, 3 do
+                    if areCoinsDetected() or not isAutoFlingSheriffActive or not target.Character or not hum or hum.Health <= 0 then break end
                     resetPlayer(target)
-                    flungTargets[target.UserId] = true
-                    watchDeath(target)
-                    task.wait(3)
+                    task.wait(0.3)
                 end
             end
         end
     end
-end)
+end
 
--- Auto Fling Murderer Routine (Triggers after full coin bag using the same reset method)
+-- Looped Auto Fling Murderer Routine until dead (Triggers after full coin bag using the same reset method)
 local function flingMurdererRoutine()
 	if not isAutoFlingMurdererActive or not isBagFull then return end
 	if hasGun() then return end
 
 	local murd = getMurd()
 	if not murd or not murd.Character then return end
-
-	resetPlayer(murd)
+	local hum = murd.Character:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health > 0 then
+		resetPlayer(murd)
+	end
 end
 
 --------------------------------------------------------
@@ -2619,11 +2643,30 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	if isShowCoinsActive then
+	-- Get Murderer position for Avoid Murderer radius 20 check & turning nearby coins red
+	local murdChar = nil
+	if isAvoidMurdererActive then
+		local murdPlayer = getMurd()
+		if murdPlayer and murdPlayer.Character then
+			murdChar = murdPlayer.Character:FindFirstChild("HumanoidRootPart") or murdPlayer.Character:FindFirstChild("UpperTorso")
+		end
+	end
+
+	if isShowCoinsActive or isAvoidMurdererActive then
 		local activeCoinMap = {}
 		for _, part in ipairs(allDescendants) do
 			if not isCoinFading(part) then
 				activeCoinMap[part] = true
+				
+				-- Check if coin is near murderer (within 20 studs)
+				local isNearMurd = false
+				if isAvoidMurdererActive and murdChar then
+					local partPos = part:IsA("BasePart") and part.Position or (part:IsA("Model") and (part.PrimaryPart and part.PrimaryPart.Position or part:FindFirstChildWhichIsA("BasePart", true).Position))
+					if partPos and (murdChar.Position - partPos).Magnitude <= 20 then
+						isNearMurd = true
+					end
+				end
+
 				if not coinHighlights[part] then
 					local hl = Instance.new("Highlight")
 					hl.Name = "CoinEspHighlight"
@@ -2631,20 +2674,28 @@ RunService.Heartbeat:Connect(function(dt)
 					hl.FillTransparency = 0.3
 					hl.OutlineTransparency = 1
 					
-					local coinColor = Color3.fromRGB(255, 215, 0)
-					if part:IsA("BasePart") then
-						coinColor = part.Color
-					elseif part:IsA("Model") then
-						local bp = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)
-						if bp then coinColor = bp.Color end
+					if isNearMurd then
+						hl.FillColor = Color3.fromRGB(255, 0, 0) -- Turn red if ignored due to murderer proximity
+					else
+						local coinColor = Color3.fromRGB(255, 215, 0)
+						if part:IsA("BasePart") then
+							coinColor = part.Color
+						elseif part:IsA("Model") then
+							local bp = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)
+							if bp then coinColor = bp.Color end
+						end
+						hl.FillColor = coinColor
 					end
-					hl.FillColor = coinColor
 					hl.Parent = part
 					coinHighlights[part] = hl
 				else
-					local bp = part:IsA("BasePart") and part or (part:IsA("Model") and (part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)))
-					if bp and coinHighlights[part] then
-						coinHighlights[part].FillColor = bp.Color
+					if isNearMurd then
+						coinHighlights[part].FillColor = Color3.fromRGB(255, 0, 0)
+					else
+						local bp = part:IsA("BasePart") and part or (part:IsA("Model") and (part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)))
+						if bp and coinHighlights[part] then
+							coinHighlights[part].FillColor = bp.Color
+						end
 					end
 				end
 			end
@@ -2669,14 +2720,16 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 
 	if isAutoFlingSheriffActive and isFarmingActive and isBagFull and isPlayerInnocent() then
-		task.spawn(flingSheriffRoutine)
+		task.spawn(executeResetSheriffThreeAttempts)
 	end
 
 	if activeCoinCount < 1 then
 		if pathBeamPart then pathBeamPart:Destroy() pathBeamPart = nil end
+		if currentTargetAnchor then currentTargetAnchor:Destroy() currentTargetAnchor = nil end
+		if bodyVelocity then bodyVelocity.Velocity = Vector3.zero end
 		if rootPart and not isAutoVoteActive and not isCurrentlyVoting then
 			rootPart.Anchored = false
-			if bodyVelocity then bodyVelocity.Velocity = Vector3.zero end
+			if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
 			if humanoid then 
 				humanoid.PlatformStand = false 
 				humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
@@ -2806,12 +2859,22 @@ RunService.Heartbeat:Connect(function(dt)
 			if cf then
 				local heightOffset = settingsData.HeightOffset
 				local targetPosWithOffset = cf.Position + Vector3.new(0, heightOffset, 0)
-				local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
 
-				if distanceToTarget < shortestDistance then
-					shortestDistance = distanceToTarget
-					closestPart = part
-					closestCF = cf
+				-- Check if murderer is within 20 studs of this coin's path/target
+				local tooCloseToMurd = false
+				if isAvoidMurdererActive and murdChar then
+					if (murdChar.Position - targetPosWithOffset).Magnitude <= 20 then
+						tooCloseToMurd = true
+					end
+				end
+
+				if not tooCloseToMurd then
+					local distanceToTarget = (rootPos - targetPosWithOffset).Magnitude
+					if distanceToTarget < shortestDistance then
+						shortestDistance = distanceToTarget
+						closestPart = part
+						closestCF = cf
+					end
 				end
 			end
 		end
