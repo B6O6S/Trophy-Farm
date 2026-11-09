@@ -221,6 +221,9 @@ local function updatePathVisualizer(enable, startPos, targetPos)
 	end)
 end
 
+-- Track whether Sheriff has already been flung this round
+local sheriffFlingDoneThisRound = false
+
 -- Reset State On Respawn & Clean Highlights to Prevent Lag Spikes
 local function onCharacterAdded(char)
 	isBagFull = false
@@ -232,6 +235,7 @@ local function onCharacterAdded(char)
 	wasVotingActive = false
 	isWaitingAfterVote = false
 	postVoteStartTime = 0
+	sheriffFlingDoneThisRound = false
 	
 	isWaitingAfterRespawn = true
 	respawnTimerStartTime = tick()
@@ -2480,50 +2484,32 @@ local function resetPlayer(TargetPlayer)
     return true
 end
 
-local function watchDeath(player)
-    if deathConnections[player.UserId] then return end
-    local function setupChar(char)
-        local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            deathConnections[player.UserId] = humanoid.Died:Connect(function()
-                flungTargets[player.UserId] = nil
-                if deathConnections[player.UserId] then
-                    deathConnections[player.UserId]:Disconnect()
-                    deathConnections[player.UserId] = nil
-                end
-            end)
-        end
-    end
-    if player.Character then setupChar(player.Character) end
-    deathConnections[player.UserId.."_char"] = player.CharacterAdded:Connect(setupChar)
+-- Helper function to check if gun drop exists in the workspace
+local function isGunDropped()
+	local gunDrop = Workspace:FindFirstChild("GunDrop", true)
+	return gunDrop ~= nil
 end
 
--- Helper function to check if any coins are currently detected/active on the map
-local function areCoinsDetected()
-	local containers = getCoinContainers()
-	for _, container in ipairs(containers) do
-		local coinFolder = container:FindFirstChild("CoinFolder") or container
-		for _, desc in ipairs(coinFolder:GetDescendants()) do
-			if isTargetCoin(desc) and not isCoinFading(desc) then
-				return true
-			end
-		end
-	end
-	return false
-end
-
--- Auto Reset Sheriff Routine: executes strictly 3 attempts and stops immediately if any coins are detected
-local function executeResetSheriffThreeAttempts()
-    if not isLocalMurderer() and isAutoFlingSheriffActive then
-		if areCoinsDetected() then return end
+-- Auto Reset Sheriff Routine: always resets sheriff instantly upon detection for 3 seconds, then waits for gun drop
+local function executeResetSheriffAlways()
+    if not isLocalMurderer() and isAutoFlingSheriffActive and not sheriffFlingDoneThisRound then
         local target = findSheriffWithFallback()
         if target and target.Character then
             local hum = target.Character:FindFirstChildOfClass("Humanoid")
             if hum and hum.Health > 0 then
-                for attempt = 1, 3 do
-                    if areCoinsDetected() or not isAutoFlingSheriffActive or not target.Character or not hum or hum.Health <= 0 then break end
+                sheriffFlingDoneThisRound = true
+                local flingStart = tick()
+                while tick() - flingStart < 3.0 do
+                    if not isAutoFlingSheriffActive or not target.Character or not hum or hum.Health <= 0 then 
+                        break 
+                    end
                     resetPlayer(target)
                     task.wait(0.3)
+                end
+                
+                -- Wait until the gun drops on the map
+                while isAutoFlingSheriffActive and not isGunDropped() do
+                    task.wait(0.5)
                 end
             end
         end
@@ -2719,8 +2705,8 @@ RunService.Heartbeat:Connect(function(dt)
 		task.spawn(flingMurdererRoutine)
 	end
 
-	if isAutoFlingSheriffActive and isFarmingActive and isBagFull and isPlayerInnocent() then
-		task.spawn(executeResetSheriffThreeAttempts)
+	if isAutoFlingSheriffActive and isFarmingActive and isPlayerInnocent() then
+		task.spawn(executeResetSheriffAlways)
 	end
 
 	if activeCoinCount < 1 then
