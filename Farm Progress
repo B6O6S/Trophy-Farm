@@ -30,7 +30,6 @@ task.spawn(function()
     roundTimerGuiBox.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     roundTimerGuiBox.BackgroundTransparency = 0.1
     roundTimerGuiBox.BorderSizePixel = 0
-    roundTimerGuiBox.Visible = true
     roundTimerGuiBox.Parent = timerGui
 
     Instance.new("UICorner", roundTimerGuiBox).CornerRadius = UDim.new(0, 12)
@@ -119,11 +118,26 @@ task.spawn(function()
     candiesTextStroke.Thickness = 1.5
     candiesTextStroke.Parent = candiesCountInsideLabel
 
-    -- Timer variables
+    -- State
     local startTime = nil
     local finished = false
-    local currentCandy = 0
-    local maximumCandy = 50
+    local generation = 0
+
+    -- Reset everything
+    local function ResetCandyTimer()
+        generation += 1
+
+        startTime = nil
+        finished = false
+
+        roundTimerLabel.Text = "Time: 0s"
+        candiesCountInsideLabel.Text = "0 / 50"
+
+        bar.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+        timerStroke.Color = Color3.fromRGB(255, 140, 0)
+
+        bar.Size = UDim2.new(0, 0, 1, 0)
+    end
 
     -- Timer updater
     task.spawn(function()
@@ -137,18 +151,13 @@ task.spawn(function()
         end
     end)
 
-    -- Update candy progress
+    -- Candy update
     local function UpdateCandy(amount, maximum)
         amount = tonumber(amount) or 0
-        maximum = tonumber(maximum) or 50
-        maximum = math.max(maximum, 1)
+        maximum = math.max(tonumber(maximum) or 50, 1)
         amount = math.clamp(amount, 0, maximum)
 
-        currentCandy = amount
-        maximumCandy = maximum
-
-        -- Start timer on first candy
-        if amount > 0 and not startTime then
+        if amount > 0 and not startTime and not finished then
             startTime = tick()
         end
 
@@ -178,9 +187,14 @@ task.spawn(function()
     end
 
     -- Initial state
-    UpdateCandy(0, 50)
+    ResetCandyTimer()
 
-    -- Remote listener
+    -- Reset on respawn
+    localPlayer.CharacterAdded:Connect(function()
+        ResetCandyTimer()
+    end)
+
+    -- Listen for Candy collection
     Remote.OnClientEvent:Connect(function(coinType, amount, maximum, data)
         if coinType == "Candy" then
             UpdateCandy(amount, maximum)
