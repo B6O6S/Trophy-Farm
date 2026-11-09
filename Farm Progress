@@ -1,6 +1,10 @@
 
+--// Optimized Candy Collection Timer
+--// Delta Executor
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local localPlayer = Players.LocalPlayer
 
@@ -9,195 +13,263 @@ local Remote = ReplicatedStorage
     :WaitForChild("Gameplay")
     :WaitForChild("CoinCollected")
 
-task.spawn(function()
-    local playerGui = localPlayer:WaitForChild("PlayerGui", 30)
-    if not playerGui then return end
+local Environment = (getgenv and getgenv()) or _G
 
-    if playerGui:FindFirstChild("ZanwahRoundTimerGui") then
-        playerGui.ZanwahRoundTimerGui:Destroy()
+--// Cleanup previous execution
+if Environment.ZanwahCandyCleanup then
+    pcall(Environment.ZanwahCandyCleanup)
+end
+
+local Connections = {}
+local CurrentTween
+local StartTime
+local Finished = false
+local TimerVersion = 0
+
+local function Track(connection)
+    table.insert(Connections, connection)
+    return connection
+end
+
+--// Create GUI
+local playerGui = localPlayer:WaitForChild("PlayerGui", 30)
+if not playerGui then return end
+
+local oldGui = playerGui:FindFirstChild("ZanwahRoundTimerGui")
+if oldGui then
+    oldGui:Destroy()
+end
+
+local timerGui = Instance.new("ScreenGui")
+timerGui.Name = "ZanwahRoundTimerGui"
+timerGui.ResetOnSpawn = false
+timerGui.DisplayOrder = 99998
+timerGui.IgnoreGuiInset = true
+timerGui.Parent = playerGui
+
+local roundTimerGuiBox = Instance.new("Frame")
+roundTimerGuiBox.Size = UDim2.new(0, 230, 0, 75)
+roundTimerGuiBox.Position = UDim2.new(0.5, -115, 0, 10)
+roundTimerGuiBox.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+roundTimerGuiBox.BackgroundTransparency = 0.1
+roundTimerGuiBox.BorderSizePixel = 0
+roundTimerGuiBox.Visible = true
+roundTimerGuiBox.Parent = timerGui
+
+Instance.new("UICorner", roundTimerGuiBox).CornerRadius = UDim.new(0, 12)
+
+local timerStroke = Instance.new("UIStroke")
+timerStroke.Color = Color3.fromRGB(255, 140, 0)
+timerStroke.Thickness = 1.5
+timerStroke.Parent = roundTimerGuiBox
+
+local roundTimerLabel = Instance.new("TextLabel")
+roundTimerLabel.Name = "TimerTextLabel"
+roundTimerLabel.Size = UDim2.new(1, 0, 0, 35)
+roundTimerLabel.Position = UDim2.new(0, 0, 0, 4)
+roundTimerLabel.BackgroundTransparency = 1
+roundTimerLabel.Text = "Time: 0s"
+roundTimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+roundTimerLabel.TextSize = 14
+roundTimerLabel.Font = Enum.Font.GothamBold
+roundTimerLabel.TextXAlignment = Enum.TextXAlignment.Center
+roundTimerLabel.Parent = roundTimerGuiBox
+
+local timerLabelStroke = Instance.new("UIStroke")
+timerLabelStroke.Color = Color3.fromRGB(0, 0, 0)
+timerLabelStroke.Thickness = 1.5
+timerLabelStroke.Parent = roundTimerLabel
+
+local barBackground = Instance.new("Frame")
+barBackground.Size = UDim2.new(1, -24, 0, 18)
+barBackground.Position = UDim2.new(0, 12, 0, 46)
+barBackground.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+barBackground.BorderSizePixel = 0
+barBackground.ClipsDescendants = true
+barBackground.Parent = roundTimerGuiBox
+
+Instance.new("UICorner", barBackground).CornerRadius = UDim.new(1, 0)
+
+local barBackgroundStroke = Instance.new("UIStroke")
+barBackgroundStroke.Color = Color3.fromRGB(0, 0, 0)
+barBackgroundStroke.Transparency = 0.5
+barBackgroundStroke.Thickness = 1
+barBackgroundStroke.Parent = barBackground
+
+local bar = Instance.new("Frame")
+bar.Size = UDim2.new(0, 0, 1, 0)
+bar.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+bar.BorderSizePixel = 0
+bar.Parent = barBackground
+
+Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+
+local contentHolder = Instance.new("Frame")
+contentHolder.Size = UDim2.new(1, 0, 1, 0)
+contentHolder.BackgroundTransparency = 1
+contentHolder.ZIndex = 3
+contentHolder.Parent = barBackground
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.FillDirection = Enum.FillDirection.Horizontal
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 4)
+listLayout.Parent = contentHolder
+
+local candyImageInsideBar = Instance.new("ImageLabel")
+candyImageInsideBar.Size = UDim2.new(0, 16, 0, 16)
+candyImageInsideBar.BackgroundTransparency = 1
+candyImageInsideBar.Image = "rbxassetid://120528163401643"
+candyImageInsideBar.ScaleType = Enum.ScaleType.Fit
+candyImageInsideBar.LayoutOrder = 1
+candyImageInsideBar.Parent = contentHolder
+
+local candiesCountInsideLabel = Instance.new("TextLabel")
+candiesCountInsideLabel.Size = UDim2.new(0, 0, 1, 0)
+candiesCountInsideLabel.AutomaticSize = Enum.AutomaticSize.X
+candiesCountInsideLabel.BackgroundTransparency = 1
+candiesCountInsideLabel.Text = "0 / 50"
+candiesCountInsideLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+candiesCountInsideLabel.TextSize = 11
+candiesCountInsideLabel.Font = Enum.Font.GothamBold
+candiesCountInsideLabel.LayoutOrder = 2
+candiesCountInsideLabel.Parent = contentHolder
+
+local candiesTextStroke = Instance.new("UIStroke")
+candiesTextStroke.Color = Color3.fromRGB(0, 0, 0)
+candiesTextStroke.Thickness = 1.5
+candiesTextStroke.Parent = candiesCountInsideLabel
+
+--// Progress animation
+local function AnimateBar(progress)
+    if CurrentTween then
+        CurrentTween:Cancel()
     end
 
-    local timerGui = Instance.new("ScreenGui")
-    timerGui.Name = "ZanwahRoundTimerGui"
-    timerGui.ResetOnSpawn = false
-    timerGui.DisplayOrder = 99998
-    timerGui.IgnoreGuiInset = true
-    timerGui.Parent = playerGui
-
-    local roundTimerGuiBox = Instance.new("Frame")
-    roundTimerGuiBox.Size = UDim2.new(0, 230, 0, 75)
-    roundTimerGuiBox.Position = UDim2.new(0.5, -115, 0, 10)
-    roundTimerGuiBox.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    roundTimerGuiBox.BackgroundTransparency = 0.1
-    roundTimerGuiBox.BorderSizePixel = 0
-    roundTimerGuiBox.Parent = timerGui
-
-    Instance.new("UICorner", roundTimerGuiBox).CornerRadius = UDim.new(0, 12)
-
-    local timerStroke = Instance.new("UIStroke")
-    timerStroke.Color = Color3.fromRGB(255, 140, 0)
-    timerStroke.Thickness = 1.5
-    timerStroke.Parent = roundTimerGuiBox
-
-    local roundTimerLabel = Instance.new("TextLabel")
-    roundTimerLabel.Name = "TimerTextLabel"
-    roundTimerLabel.Size = UDim2.new(1, 0, 0, 35)
-    roundTimerLabel.Position = UDim2.new(0, 0, 0, 4)
-    roundTimerLabel.BackgroundTransparency = 1
-    roundTimerLabel.Text = "Time: 0s"
-    roundTimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    roundTimerLabel.TextSize = 14
-    roundTimerLabel.Font = Enum.Font.GothamBold
-    roundTimerLabel.TextXAlignment = Enum.TextXAlignment.Center
-    roundTimerLabel.Parent = roundTimerGuiBox
-
-    local timerLabelStroke = Instance.new("UIStroke")
-    timerLabelStroke.Color = Color3.fromRGB(0, 0, 0)
-    timerLabelStroke.Thickness = 1.5
-    timerLabelStroke.Parent = roundTimerLabel
-
-    local barBackground = Instance.new("Frame")
-    barBackground.Size = UDim2.new(1, -24, 0, 18)
-    barBackground.Position = UDim2.new(0, 12, 0, 46)
-    barBackground.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    barBackground.BorderSizePixel = 0
-    barBackground.ClipsDescendants = true
-    barBackground.Parent = roundTimerGuiBox
-
-    Instance.new("UICorner", barBackground).CornerRadius = UDim.new(1, 0)
-
-    local barBackgroundStroke = Instance.new("UIStroke")
-    barBackgroundStroke.Color = Color3.fromRGB(0, 0, 0)
-    barBackgroundStroke.Transparency = 0.5
-    barBackgroundStroke.Thickness = 1
-    barBackgroundStroke.Parent = barBackground
-
-    local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(0, 0, 1, 0)
-    bar.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-    bar.BorderSizePixel = 0
-    bar.Parent = barBackground
-
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
-
-    local contentHolder = Instance.new("Frame")
-    contentHolder.Size = UDim2.new(1, 0, 1, 0)
-    contentHolder.BackgroundTransparency = 1
-    contentHolder.ZIndex = 3
-    contentHolder.Parent = barBackground
-
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.FillDirection = Enum.FillDirection.Horizontal
-    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    listLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Padding = UDim.new(0, 4)
-    listLayout.Parent = contentHolder
-
-    local candyImageInsideBar = Instance.new("ImageLabel")
-    candyImageInsideBar.Size = UDim2.new(0, 16, 0, 16)
-    candyImageInsideBar.BackgroundTransparency = 1
-    candyImageInsideBar.Image = "rbxassetid://120528163401643"
-    candyImageInsideBar.ScaleType = Enum.ScaleType.Fit
-    candyImageInsideBar.LayoutOrder = 1
-    candyImageInsideBar.Parent = contentHolder
-
-    local candiesCountInsideLabel = Instance.new("TextLabel")
-    candiesCountInsideLabel.Size = UDim2.new(0, 0, 1, 0)
-    candiesCountInsideLabel.AutomaticSize = Enum.AutomaticSize.X
-    candiesCountInsideLabel.BackgroundTransparency = 1
-    candiesCountInsideLabel.Text = "0 / 50"
-    candiesCountInsideLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    candiesCountInsideLabel.TextSize = 11
-    candiesCountInsideLabel.Font = Enum.Font.GothamBold
-    candiesCountInsideLabel.LayoutOrder = 2
-    candiesCountInsideLabel.Parent = contentHolder
-
-    local candiesTextStroke = Instance.new("UIStroke")
-    candiesTextStroke.Color = Color3.fromRGB(0, 0, 0)
-    candiesTextStroke.Thickness = 1.5
-    candiesTextStroke.Parent = candiesCountInsideLabel
-
-    -- State
-    local startTime = nil
-    local finished = false
-    local generation = 0
-
-    -- Reset everything
-    local function ResetCandyTimer()
-        generation += 1
-
-        startTime = nil
-        finished = false
-
-        roundTimerLabel.Text = "Time: 0s"
-        candiesCountInsideLabel.Text = "0 / 50"
-
-        bar.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-        timerStroke.Color = Color3.fromRGB(255, 140, 0)
-
-        bar.Size = UDim2.new(0, 0, 1, 0)
-    end
-
-    -- Timer updater
-    task.spawn(function()
-        while timerGui.Parent do
-            task.wait(0.1)
-
-            if startTime and not finished then
-                local elapsed = math.floor(tick() - startTime)
-                roundTimerLabel.Text = string.format("Time: %ds", elapsed)
-            end
-        end
-    end)
-
-    -- Candy update
-    local function UpdateCandy(amount, maximum)
-        amount = tonumber(amount) or 0
-        maximum = math.max(tonumber(maximum) or 50, 1)
-        amount = math.clamp(amount, 0, maximum)
-
-        if amount > 0 and not startTime and not finished then
-            startTime = tick()
-        end
-
-        candiesCountInsideLabel.Text = string.format(
-            "%d / %d",
-            amount,
-            maximum
-        )
-
-        if amount >= maximum and not finished then
-            finished = true
-
-            local finalTime = math.floor(tick() - startTime)
-            roundTimerLabel.Text = string.format("FULL - %ds", finalTime)
-
-            bar.BackgroundColor3 = Color3.fromRGB(0, 220, 80)
-            timerStroke.Color = Color3.fromRGB(0, 220, 80)
-        end
-
-        bar:TweenSize(
-            UDim2.new(amount / maximum, 0, 1, 0),
-            Enum.EasingDirection.Out,
-            Enum.EasingStyle.Quad,
+    CurrentTween = TweenService:Create(
+        bar,
+        TweenInfo.new(
             0.2,
-            true
-        )
-    end
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ),
+        {
+            Size = UDim2.new(progress, 0, 1, 0)
+        }
+    )
 
-    -- Initial state
-    ResetCandyTimer()
+    CurrentTween:Play()
+end
 
-    -- Reset on respawn
-    localPlayer.CharacterAdded:Connect(function()
-        ResetCandyTimer()
-    end)
+--// Reset counter
+local function ResetCounter()
+    TimerVersion += 1
 
-    -- Listen for Candy collection
-    Remote.OnClientEvent:Connect(function(coinType, amount, maximum, data)
-        if coinType == "Candy" then
-            UpdateCandy(amount, maximum)
+    StartTime = nil
+    Finished = false
+
+    roundTimerLabel.Text = "Time: 0s"
+    candiesCountInsideLabel.Text = "0 / 50"
+
+    bar.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+    timerStroke.Color = Color3.fromRGB(255, 140, 0)
+
+    AnimateBar(0)
+end
+
+--// Timer
+local function StartTimer()
+    if StartTime or Finished then return end
+
+    StartTime = os.clock()
+    TimerVersion += 1
+
+    local version = TimerVersion
+
+    task.spawn(function()
+        while timerGui.Parent
+            and version == TimerVersion
+            and not Finished do
+
+            task.wait(1)
+
+            if version ~= TimerVersion or Finished then
+                break
+            end
+
+            local elapsed = math.floor(os.clock() - StartTime)
+            roundTimerLabel.Text = string.format("Time: %ds", elapsed)
         end
     end)
-end)
+end
+
+--// Update candy
+local function UpdateCandy(amount, maximum)
+    amount = tonumber(amount) or 0
+    maximum = math.max(tonumber(maximum) or 50, 1)
+    amount = math.clamp(amount, 0, maximum)
+
+    if Finished then return end
+
+    -- Start on first candy
+    if amount > 0 and not StartTime then
+        StartTimer()
+    end
+
+    -- Full collection
+    if amount >= maximum then
+        Finished = true
+
+        local finalTime = math.floor(os.clock() - StartTime)
+
+        roundTimerLabel.Text = string.format("FULL - %ds", finalTime)
+        candiesCountInsideLabel.Text = "FULL"
+
+        bar.BackgroundColor3 = Color3.fromRGB(0, 220, 80)
+        timerStroke.Color = Color3.fromRGB(0, 220, 80)
+
+        AnimateBar(1)
+        return
+    end
+
+    candiesCountInsideLabel.Text = string.format(
+        "%d / %d",
+        amount,
+        maximum
+    )
+
+    AnimateBar(amount / maximum)
+end
+
+--// Remote listener
+Track(Remote.OnClientEvent:Connect(function(coinType, amount, maximum)
+    if coinType == "Candy" then
+        UpdateCandy(amount, maximum)
+    end
+end))
+
+--// Respawn reset
+Track(localPlayer.CharacterAdded:Connect(ResetCounter))
+
+--// Initial reset
+ResetCounter()
+
+--// Cleanup
+Environment.ZanwahCandyCleanup = function()
+    TimerVersion += 1
+
+    for _, connection in ipairs(Connections) do
+        connection:Disconnect()
+    end
+
+    if CurrentTween then
+        CurrentTween:Cancel()
+        CurrentTween = nil
+    end
+
+    if timerGui.Parent then
+        timerGui:Destroy()
+    end
+end
