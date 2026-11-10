@@ -1846,7 +1846,7 @@ task.spawn(function()
 	end)
 end)
 
--- 3. Advanced FPS Booster Module with Custom Skybox (99742693890881)
+-- 3. Advanced FPS Booster Module with Custom Skybox (99742693890881) & Auto-Apply on Rejoin
 local function removeLaggyObject(v)
 	if v:IsA("Decal") or v:IsA("Texture") or v:IsA("ParticleEmitter") or 
 	   v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") or v:IsA("Sparkles") or 
@@ -1912,6 +1912,14 @@ function applyFpsBoost()
 	end)
 end
 
+-- Immediately apply FPS Boost upon rejoin/startup if setting is enabled
+if fpsBoosterState.value then
+	task.spawn(function()
+		task.wait(0.5)
+		applyFpsBoost()
+	end)
+end
+
 Workspace.DescendantAdded:Connect(function(descendant)
 	if fpsBoosterState.value then
 		task.defer(function()
@@ -1932,7 +1940,7 @@ Lighting.ChildAdded:Connect(function(child)
 	end
 end)
 
--- 4. Auto Kill All Routine
+-- 4. Auto Kill All Routine (Triggers automatically when bag is full)
 task.spawn(function()
 	local function getKnifeModular()
 		local char = localPlayer.Character
@@ -1968,7 +1976,8 @@ task.spawn(function()
 
 	while true do
 		task.wait(0.5)
-		if autoKillAllState.value then
+		-- Auto Kill All now starts once AutoKillAll toggle is ON AND the coin bag is full
+		if autoKillAllState.value and isBagFull then
 			pcall(function()
 				equipKnifeModular()
 				local knife = getKnifeModular()
