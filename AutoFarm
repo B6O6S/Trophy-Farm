@@ -38,6 +38,7 @@ local settingsData = {
 	OptimizedCoins = false,
 	FpsBooster = false,
 	ShowCoinAuraBox = false,
+	InnocentAutoReset = false,
 	AntiFling = true,
 	AntiAFK = true,
 	AutoRejoin = true,
@@ -71,6 +72,7 @@ local showCoinsState = { value = settingsData.ShowCoins }
 local fpsBoosterState = { value = settingsData.FpsBooster }
 local autoKillAllState = { value = settingsData.AutoKillAll }
 local autoVoteState = { value = settingsData.AutoVote }
+local innocentAutoResetState = { value = settingsData.InnocentAutoReset }
 
 -- State Variables synced with Saved Settings
 local isFarmingActive = settingsData.AutoFarm
@@ -977,7 +979,7 @@ task.spawn(function()
 	autoFarmScroll.Position = UDim2.new(0, 5, 0, 68)
 	autoFarmScroll.BackgroundTransparency = 1
 	autoFarmScroll.BorderSizePixel = 0
-	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 630)
+	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 660)
 	autoFarmScroll.ScrollBarThickness = 2
 	autoFarmScroll.Visible = true
 	autoFarmScroll.Parent = mainFrame
@@ -1410,7 +1412,23 @@ task.spawn(function()
 	local avoidBtn = createButton(autoFarmScroll, "Avoid Murderer", 240, isAvoidMurdererActive)
 	local grabGunBtn = createButton(autoFarmScroll, "Auto Grab Gun", 268, isAutoGrabGunActive)
 
-	local flingMurdBtn = createButton(autoFarmScroll, "Auto Fling Murderer", 296, isAutoFlingMurdererActive)
+	local innocentAutoResetBtn = createButton(autoFarmScroll, "Innocent Auto Reset", 296, innocentAutoResetState.value)
+	local innocentResetLabel = Instance.new("TextLabel")
+	innocentResetLabel.Size = UDim2.new(0, 65, 1, 0)
+	innocentResetLabel.Position = UDim2.new(1, -69, 0, 0)
+	innocentResetLabel.BackgroundTransparency = 1
+	innocentResetLabel.Text = "[ Innocent ]"
+	innocentResetLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+	innocentResetLabel.TextSize = 9
+	innocentResetLabel.Font = Enum.Font.GothamBold
+	innocentResetLabel.TextXAlignment = Enum.TextXAlignment.Right
+	innocentResetLabel.Parent = innocentAutoResetBtn
+	local innocentResetStroke = Instance.new("UIStroke")
+	innocentResetStroke.Color = Color3.fromRGB(0, 0, 0)
+	innocentResetStroke.Thickness = 1.5
+	innocentResetStroke.Parent = innocentResetLabel
+
+	local flingMurdBtn = createButton(autoFarmScroll, "Auto Fling Murderer", 324, isAutoFlingMurdererActive)
 	local innocentRoleLabel1 = Instance.new("TextLabel")
 	innocentRoleLabel1.Size = UDim2.new(0, 65, 1, 0)
 	innocentRoleLabel1.Position = UDim2.new(1, -69, 0, 0)
@@ -1426,7 +1444,7 @@ task.spawn(function()
 	innocentStroke1.Thickness = 1.5
 	innocentStroke1.Parent = innocentRoleLabel1
 
-	local flingSheriffBtn = createButton(autoFarmScroll, "Auto Fling Sheriff", 324, isAutoFlingSheriffActive)
+	local flingSheriffBtn = createButton(autoFarmScroll, "Auto Fling Sheriff", 352, isAutoFlingSheriffActive)
 	local innocentRoleLabel2 = Instance.new("TextLabel")
 	innocentRoleLabel2.Size = UDim2.new(0, 65, 1, 0)
 	innocentRoleLabel2.Position = UDim2.new(1, -69, 0, 0)
@@ -1442,7 +1460,7 @@ task.spawn(function()
 	innocentStroke2.Thickness = 1.5
 	innocentStroke2.Parent = innocentRoleLabel2
 
-	local shootBtn = createButton(autoFarmScroll, "Auto Shoot Murderer", 352, isShootMurdererActive)
+	local shootBtn = createButton(autoFarmScroll, "Auto Shoot Murderer", 380, isShootMurdererActive)
 	local sheriffRoleLabel = Instance.new("TextLabel")
 	sheriffRoleLabel.Size = UDim2.new(0, 60, 1, 0)
 	sheriffRoleLabel.Position = UDim2.new(1, -64, 0, 0)
@@ -1458,7 +1476,7 @@ task.spawn(function()
 	sheriffStroke.Thickness = 1.5
 	sheriffStroke.Parent = sheriffRoleLabel
 
-	local killBtn = createButton(autoFarmScroll, "Auto Kill All", 380, autoKillAllState.value)
+	local killBtn = createButton(autoFarmScroll, "Auto Kill All", 408, autoKillAllState.value)
 	local murdRoleLabel = Instance.new("TextLabel")
 	murdRoleLabel.Size = UDim2.new(0, 65, 1, 0)
 	murdRoleLabel.Position = UDim2.new(1, -69, 0, 0)
@@ -1474,12 +1492,12 @@ task.spawn(function()
 	murdStroke.Thickness = 1.5
 	murdStroke.Parent = murdRoleLabel
 
-	createHeaderLabel(autoFarmScroll, "CUSTOMIZATIONS:", 416)
-	local showCoinsBtn = createButton(autoFarmScroll, "Show Candies", 438, showCoinsState.value)
-	local showPathBtn = createButton(autoFarmScroll, "Show Path", 466, isShowPathActive)
-	local optimizedCoinsBtn = createButton(autoFarmScroll, "Optimize Candies", 494, optimizeCoinsState.value)
-	local fpsBtn = createButton(autoFarmScroll, "FPS Boost", 522, fpsBoosterState.value)
-	local showCoinBoxBtn = createButton(autoFarmScroll, "Show Candy Aura Box", 550, isShowCoinAuraBoxActive)
+	createHeaderLabel(autoFarmScroll, "CUSTOMIZATIONS:", 444)
+	local showCoinsBtn = createButton(autoFarmScroll, "Show Candies", 466, showCoinsState.value)
+	local showPathBtn = createButton(autoFarmScroll, "Show Path", 494, isShowPathActive)
+	local optimizedCoinsBtn = createButton(autoFarmScroll, "Optimize Candies", 522, optimizeCoinsState.value)
+	local fpsBtn = createButton(autoFarmScroll, "FPS Boost", 550, fpsBoosterState.value)
+	local showCoinBoxBtn = createButton(autoFarmScroll, "Show Candy Aura Box", 578, isShowCoinAuraBoxActive)
 
 	createHeaderLabel(settingsScroll, "SETTINGS:", 0)
 	local antiFlingBtn = createButton(settingsScroll, "Anti Fling", 25, isAntiFlingActive)
@@ -1651,6 +1669,13 @@ task.spawn(function()
 		settingsData.AutoGrabGun = isAutoGrabGunActive
 		saveSettings()
 		updateToggleVisual(grabGunBtn, isAutoGrabGunActive, "Auto Grab Gun")
+	end)
+
+	innocentAutoResetBtn.MouseButton1Click:Connect(function()
+		innocentAutoResetState.value = not innocentAutoResetState.value
+		settingsData.InnocentAutoReset = innocentAutoResetState.value
+		saveSettings()
+		updateToggleVisual(innocentAutoResetBtn, innocentAutoResetState.value, "Innocent Auto Reset")
 	end)
 
 	flingMurdBtn.MouseButton1Click:Connect(function()
@@ -1976,7 +2001,6 @@ task.spawn(function()
 
 	while true do
 		task.wait(0.5)
-		-- Auto Kill All now starts once AutoKillAll toggle is ON AND the coin bag is full
 		if autoKillAllState.value and isBagFull then
 			pcall(function()
 				equipKnifeModular()
@@ -2000,7 +2024,23 @@ task.spawn(function()
 	end
 end)
 
--- 5. Auto Vote Routine
+-- 5. Innocent Auto Reset Routine (Resets when bag is full and player is innocent)
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		if innocentAutoResetState.value and isBagFull and isPlayerInnocent() then
+			pcall(function()
+				local char = localPlayer.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then
+					hum.Health = 0
+				end
+			end)
+		end
+	end
+end)
+
+-- 6. Auto Vote Routine
 task.spawn(function()
 	local PAD_NAMES = { "VotePad1", "VotePad2", "VotePad3" }
 	local ORDER = {
@@ -2020,7 +2060,7 @@ task.spawn(function()
 		return p and s:sub(1, p - 1) or s
 	end
 
-	local RANK_SMALL_VOTE = {}
+	RANK_SMALL_VOTE = {}
 	for i, name in ipairs(ORDER) do
 		local full = normalizeVote(name)
 		local base = stripParenVote(full)
@@ -2659,10 +2699,12 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 		if isBagFull and isFarmingActive and rootPart then
 			if bodyVelocity then bodyVelocity.Velocity = Vector3.zero end
-			isScriptTeleporting = true
-			rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 40, 0)
-			lastPosition = rootPart.Position
-			task.delay(0.2, function() isScriptTeleporting = false end)
+			if not innocentAutoResetState.value then
+				isScriptTeleporting = true
+				rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 40, 0)
+				lastPosition = rootPart.Position
+				task.delay(0.2, function() isScriptTeleporting = false end)
+			end
 		end
 		return
 	end
@@ -2707,6 +2749,8 @@ RunService.Heartbeat:Connect(function(dt)
 
 			if hasKnife() and autoKillAllState.value then
 				-- handled by modular task routine
+			elseif innocentAutoResetState.value and isPlayerInnocent() then
+				-- handled by innocent auto reset task routine
 			else
 				isScriptTeleporting = true
 				rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 40, 0)
