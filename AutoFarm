@@ -1167,7 +1167,6 @@ task.spawn(function()
 	Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0, 4)
 
 	local dropdownStroke = Instance.new("UIStroke")
-	strokeColor = Color3.fromRGB(0, 0, 0)
 	dropdownStroke.Color = Color3.fromRGB(0, 0, 0)
 	dropdownStroke.Thickness = 1
 	dropdownStroke.Parent = dropdownBtn
@@ -1785,8 +1784,8 @@ local function shootMurd()
 		local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
 		if hrp then
 			local now = tick()
-			-- Throttle shooting to every 0.35 seconds to completely prevent spam & ping lag
-			if now - lastShotTime >= 0.35 then
+			-- Throttle shooting to every 2.7 seconds as requested
+			if now - lastShotTime >= 2.7 then
 				lastShotTime = now
 				shootMurdererInstantly(hrp, currentPingVal, currentFps)
 			end
@@ -1995,7 +1994,13 @@ local function getOpenPads()
 		local container = gui and gui:FindFirstChild("Container")
 		local label = container and container:FindFirstChild("MapName")
 		if trigger and label and gui.Enabled then
-			table.insert(open, { trigger = trigger, gui = gui, map = label.Text })
+			local mapNameStr = label.Text
+			local low = normalize(mapNameStr)
+			local clean = stripParen(low)
+			-- Filter out Barn completely
+			if low ~= "barn" and clean ~= "barn" and not low:find("barn") then
+				table.insert(open, { trigger = trigger, gui = gui, map = mapNameStr })
+			end
 		end
 	end
 	return open
