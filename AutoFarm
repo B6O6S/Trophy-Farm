@@ -1322,13 +1322,6 @@ task.spawn(function()
 		applyAntiVoid(isAntiVoidActive)
 	end)
 
-	safeModeBtn.MouseButton1Click:Connect(function()
-		isSafeModeActive = not isSafeModeActive
-		settingsData.SafeMode = isSafeModeActive
-		saveSettings()
-		updateToggleVisual(safeModeBtn, isSafeModeActive, "Safe Mode")
-	end)
-
 	rejoinBtn.MouseButton1Click:Connect(function()
 		isAutoRejoinActive = not isAutoRejoinActive
 		settingsData.AutoRejoin = isAutoRejoinActive
