@@ -14,6 +14,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local Camera = Workspace.CurrentCamera
 
 local LocalPlayer = Players.LocalPlayer
+local player = LocalPlayer
 
 -- Server Join Start Time
 local serverJoinTime = tick()
@@ -113,7 +114,6 @@ local lastResetAttempt = 0
 local RESET_COORDINATE_COOLDOWN = 0.4
 local customResetDuration = 1
 local resetStartStuds = 3.5
-local isResetting = false
 local originalDestroyHeight = Workspace.FallenPartsDestroyHeight
 
 -- Coins Per Hour & Performance Tracker Variables
@@ -130,10 +130,21 @@ local votedChar = nil
 local coinHighlights = {}
 local coinAuraBoxPart = nil
 
+-- Create Permanent Safe Platform at (1000, 1000, 1000)
+local safePlatformPart = Instance.new("Part")
+safePlatformPart.Name = "MaxCoinsSafePlatform"
+safePlatformPart.Size = Vector3.new(300, 0.1, 300)
+safePlatformPart.Position = Vector3.new(1000, 1000, 1000)
+safePlatformPart.Color = Color3.fromRGB(128, 128, 128)
+safePlatformPart.Material = Enum.Material.Plastic
+safePlatformPart.Transparency = 0.5
+safePlatformPart.Anchored = true
+safePlatformPart.CanCollide = true
+safePlatformPart.Parent = Workspace
+
 -- Dynamic Performance Trackers for Predictive Shooting
 local currentPingVal = 0
 
--- Helper Function to Format Time Interval
 local function formatDuration(seconds)
 	local days = math.floor(seconds / 86400)
 	local hours = math.floor((seconds % 86400) / 3600)
@@ -187,7 +198,6 @@ local function onCharacterAdded(char)
 		lastPosition = hrp.Position
 	end
 
-	-- Safe Mode Logic: Reset 15s timer and perform -50 Y TP upon completion
 	if isSafeModeActive then
 		safeModeTimer = 15
 		if safeModeCoroutine then
@@ -227,38 +237,25 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
--- ==================== ANTI-FLING IMPLEMENTATION ====================
-local function SetupAntiFling()
-    local LastPosition = nil
-    RunService.Heartbeat:Connect(function()
-        if not isAntiFlingActive then return end
-        pcall(function()
-            local Character = LocalPlayer.Character
-            if not Character then return end
-            
-            local PrimaryPart = Character.PrimaryPart
-            if not PrimaryPart then return end
-
-            local linVel = PrimaryPart.AssemblyLinearVelocity.Magnitude
-            local angVel = PrimaryPart.AssemblyAngularVelocity.Magnitude
-
-            if linVel > 250 or angVel > 250 then
-                PrimaryPart.AssemblyAngularVelocity = Vector3.zero
-                PrimaryPart.AssemblyLinearVelocity = Vector3.zero
-                if LastPosition then
-                    PrimaryPart.CFrame = LastPosition
+-- ==================== CUSTOM ANTI-FLING IMPLEMENTATION ====================
+local function DisableCollision()
+    if not isAntiFlingActive then return end
+    for _, playerObj in ipairs(Players:GetPlayers()) do
+        if playerObj ~= LocalPlayer and playerObj.Character then
+            for _, part in ipairs(playerObj.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
                 end
-            elseif linVel < 50 and angVel < 50 then
-                LastPosition = PrimaryPart.CFrame
             end
-        end)
-    end)
+        end
+    end
 end
 
-SetupAntiFling()
+RunService.Stepped:Connect(DisableCollision)
+
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
-    SetupAntiFling()
+    DisableCollision()
 end)
 
 -- ==================== ANTI-AFK IMPLEMENTATION ====================
@@ -272,7 +269,6 @@ if not getgenv().AntiAFKLoaded then
     end)
 end
 
--- Instant Auto-Rejoin On Kick
 local function attemptRejoin()
 	if not isAutoRejoinActive then return end
 	task.spawn(function()
@@ -305,7 +301,6 @@ end
 
 setupAutoRejoin()
 
--- ==================== ANTI VOID HANDLER ====================
 local function applyAntiVoid(enable)
 	pcall(function()
 		if enable then
@@ -320,7 +315,6 @@ if isAntiVoidActive then
 	applyAntiVoid(true)
 end
 
--- ==================== SHOW COIN AURA BOX HANDLER ====================
 local function updateCoinAuraBox(enable)
 	pcall(function()
 		if enable then
@@ -348,7 +342,6 @@ if isShowCoinAuraBoxActive then
 	updateCoinAuraBox(true)
 end
 
--- ==================== FPS BOOSTER ENGINE ====================
 local lightingConnection = nil
 local workspaceConnection = nil
 
@@ -457,7 +450,6 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
--- ==================== COIN AURA METHODS ====================
 local function touch(a, b)
 	pcall(function()
 		if firetouchinterest then
@@ -505,7 +497,6 @@ local function isCoinFading(part)
 	return false
 end
 
--- Tool & Weapon Identification & Force Equip Logic
 local function getGun()
 	local char = LocalPlayer.Character
 	if char then
@@ -560,14 +551,23 @@ local function equipKnife()
 	return false
 end
 
+local function unequipKnife()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:UnequipTools()
+	end
+end
+
 local function hasWeapon()
 	return hasKnife() or hasGun()
 end
 
-local function hasKnifeCheck(player)
-    local character = player.Character
+local function hasKnifeCheck(playerObj)
+    local character = playerObj.Character
     if not character then return false end
-    for _, tool in ipairs(player.Backpack:GetChildren()) do
+    for _, tool in ipairs(playerObj.Backpack:GetChildren()) do
         if tool:IsA("Tool") and (tool.Name:lower():find("knife") or tool.Name:lower() == "theknife") then return true end
     end
     for _, tool in ipairs(character:GetChildren()) do
@@ -576,9 +576,21 @@ local function hasKnifeCheck(player)
     return false
 end
 
+local function hasGunCheck(playerObj)
+    local character = playerObj.Character
+    if not character then return false end
+    for _, tool in ipairs(playerObj.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and (tool.Name:lower():find("gun") or tool.Name:lower():find("revolver")) then return true end
+    end
+    for _, tool in ipairs(character:GetChildren()) do
+        if tool:IsA("Tool") and (tool.Name:lower():find("gun") or tool.Name:lower():find("revolver")) then return true end
+    end
+    return false
+end
+
 local function getMurd()
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= LocalPlayer and hasKnifeCheck(player) then return player end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and hasKnifeCheck(p) then return p end
 	end
 	local success, roleData = pcall(function()
 		local remote = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
@@ -595,8 +607,39 @@ local function getMurd()
 	return nil
 end
 
+local function getSheriff()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and hasGunCheck(p) then return p end
+	end
+	local success, roleData = pcall(function()
+		local remote = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
+		if remote and remote:IsA("RemoteFunction") then return remote:InvokeServer() end
+	end)
+	if success and roleData then
+		for playerName, data in pairs(roleData) do
+			if (data.Role == "Sheriff" or data.Role == "Hero") and not data.Killed and not data.Dead then
+				local p = Players:FindFirstChild(playerName)
+				if p and p ~= LocalPlayer then return p end
+			end
+		end
+	end
+	return nil
+end
+
+local function isMurderer()
+	return hasKnifeCheck(LocalPlayer)
+end
+
+local function isSheriff()
+	return hasGunCheck(LocalPlayer) or getSheriff() == LocalPlayer
+end
+
+local function isWhitelisted(p)
+	return false
+end
+
 --------------------------------------------------------
--- GUI CREATION (ZANWAH HUB - EXACT THEME & LAYOUT)
+-- GUI CREATION
 --------------------------------------------------------
 local cphLabel, sessionCoinsLabel, roundCoinsLabel, serverTimerLabel, headerFpsLabel, headerPingLabel, avgCphLabel, statusLabel
 local isMinimized = false
@@ -613,7 +656,6 @@ task.spawn(function()
 		playerGui.ZanwahNotificationGui:Destroy()
 	end
 
-	-- ==================== NOTIFICATION GUI ====================
 	local notifGui = Instance.new("ScreenGui")
 	notifGui.Name = "ZanwahNotificationGui"
 	notifGui.ResetOnSpawn = false
@@ -677,7 +719,6 @@ task.spawn(function()
 		notifGui:Destroy()
 	end)
 
-	-- ==================== MAIN SCRIPT GUI ====================
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "EliteAutomationGui"
 	screenGui.ResetOnSpawn = false
@@ -693,7 +734,6 @@ task.spawn(function()
 	toggleGuiBtn.Active = true
 	toggleGuiBtn.Parent = screenGui
 
-	-- Fixed Dragging Logic (No vertical jump)
 	local dragging = false
 	local dragStart = Vector2.zero
 	local startPos = UDim2.new()
@@ -841,7 +881,7 @@ task.spawn(function()
 	autoFarmScroll.Position = UDim2.new(0, 5, 0, 68)
 	autoFarmScroll.BackgroundTransparency = 1
 	autoFarmScroll.BorderSizePixel = 0
-	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 560)
+	autoFarmScroll.CanvasSize = UDim2.new(0, 0, 0, 570)
 	autoFarmScroll.ScrollBarThickness = 2
 	autoFarmScroll.Visible = true
 	autoFarmScroll.Parent = mainFrame
@@ -1632,7 +1672,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 --------------------------------------------------------
--- OPTIMIZED PREDICTIVE SHOOTING & TARGETING
+-- PREDICTIVE SHOOTING & TARGETING
 --------------------------------------------------------
 local motionPart, motionPosition, motionTime
 local measuredVelocity = Vector3.zero
@@ -1706,7 +1746,6 @@ local function shootMurdererInstantly(targetPart, currentPing, currentFps)
 		rootPart.Anchored = false
 		rootPart.CFrame = CFrame.new(610, 562, 60)
 
-		-- Spectate Murderer instead of locking standard camera
 		local murdPlayer = getMurd()
 		if murdPlayer and murdPlayer.Character then
 			camera.CameraSubject = murdPlayer.Character:FindFirstChildOfClass("Humanoid") or murdPlayer.Character.PrimaryPart
@@ -1773,7 +1812,9 @@ local function updateTargetAnchor(cframe)
 end
 
 local function shootMurd()
+	local isFirstShot = true
 	local lastShotTime = 0
+	
 	while isShootMurdererActive do
 		local murd = getMurd()
 		if not murd or not murd.Character then break end
@@ -1784,10 +1825,26 @@ local function shootMurd()
 		local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
 		if hrp then
 			local now = tick()
-			-- Throttle shooting to every 2.7 seconds as requested
-			if now - lastShotTime >= 2.7 then
-				lastShotTime = now
-				shootMurdererInstantly(hrp, currentPingVal, currentFps)
+			
+			if isFirstShot then
+				task.wait(0.3)
+				if not isShootMurdererActive then break end
+				
+				murd = getMurd()
+				if not murd or not murd.Character then break end
+				local currentHum = murd.Character:FindFirstChildOfClass("Humanoid")
+				if currentHum and currentHum.Health <= 0 then break end
+				local currentHrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
+				if not currentHrp then break end
+				
+				shootMurdererInstantly(currentHrp, currentPingVal, currentFps)
+				lastShotTime = tick()
+				isFirstShot = false
+			else
+				if now - lastShotTime >= 2.7 then
+					lastShotTime = now
+					shootMurdererInstantly(hrp, currentPingVal, currentFps)
+				end
 			end
 		else
 			break
@@ -1795,7 +1852,6 @@ local function shootMurd()
 		task.wait(0.1)
 	end
 	
-	-- Restore default camera to local character when done shooting
 	pcall(function()
 		local camera = Workspace.CurrentCamera
 		local localHum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -1805,27 +1861,63 @@ local function shootMurd()
 	end)
 end
 
+-- ==================== KILL METHODS ====================
 local function killAll()
-	equipKnife()
-	local knife = getKnife()
-	if not knife then return end
-	local events = knife:FindFirstChild("Events")
-	if not events then return end
-	local handleTouched = events:FindFirstChild("HandleTouched")
-	if not handleTouched then return end
-	local targets = {}
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= LocalPlayer and p.Character then
-			local upperTorso = p.Character:FindFirstChild("UpperTorso")
-			if upperTorso then table.insert(targets, upperTorso) end
-		end
-	end
-	for _, upperTorso in ipairs(targets) do
-		handleTouched:FireServer(upperTorso)
-	end
+    local knife = getKnife()
+    if not knife then return end
+    local events = knife:FindFirstChild("Events")
+    if not events then return end
+    local handleTouched = events:FindFirstChild("HandleTouched")
+    if not handleTouched then return end
+
+    local targets = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character and not isWhitelisted(p) then
+            local upperTorso = p.Character:FindFirstChild("UpperTorso")
+            if upperTorso then
+                table.insert(targets, upperTorso)
+            end
+        end
+    end
+
+    for _, upperTorso in ipairs(targets) do
+        handleTouched:FireServer(upperTorso)
+    end
 end
 
--- ==================== NEW DELTA FLING METHODS ====================
+local function killAllExceptOne()
+    local knife = getKnife()
+    if not knife then return false end
+    local events = knife:FindFirstChild("Events")
+    if not events then return false end
+    local handleTouched = events:FindFirstChild("HandleTouched")
+    if not handleTouched then return false end
+
+    local allPlayers = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character then
+            local upperTorso = p.Character:FindFirstChild("UpperTorso")
+            if upperTorso and not isWhitelisted(p) then
+                table.insert(allPlayers, upperTorso)
+            end
+        end
+    end
+
+    if #allPlayers < 1 then return false end
+    local survivorIndex = math.random(1, #allPlayers)
+    local survivor = allPlayers[survivorIndex]
+
+    for _, upperTorso in ipairs(allPlayers) do
+        if upperTorso ~= survivor then
+            handleTouched:FireServer(upperTorso)
+            task.wait(0.05)
+        end
+    end
+    unequipKnife()
+    return true
+end
+
+-- ==================== DELTA FLING METHODS ====================
 local function setRootReference(root, target)
     pcall(function()
         if sethiddenproperty then
@@ -1863,7 +1955,7 @@ local function fullyRestoreCharacter(character, savedData)
     end
 end
 
-local function resetPlayer(TargetPlayer)
+local function resetPlayerCustomDuration(TargetPlayer, duration)
     if not TargetPlayer then return false end
     if tick() - lastResetAttempt < RESET_COORDINATE_COOLDOWN then return false end
     if TargetPlayer == LocalPlayer then return false end
@@ -1900,7 +1992,7 @@ local function resetPlayer(TargetPlayer)
     
     local conn
     conn = RunService.Heartbeat:Connect(function()
-        if tick() - startTime > customResetDuration or not TargetPlayer.Character or not TRootPart.Parent then
+        if tick() - startTime > duration or not TargetPlayer.Character or not TRootPart.Parent then
             Workspace.FallenPartsDestroyHeight = previousDestroyHeight
             if bv.Parent then bv:Destroy() end
             if bg.Parent then bg:Destroy() end
@@ -1936,6 +2028,10 @@ local function resetPlayer(TargetPlayer)
         if conn then conn:Disconnect() end
     end
     return true
+end
+
+local function resetPlayer(TargetPlayer)
+    return resetPlayerCustomDuration(TargetPlayer, customResetDuration)
 end
 
 local function flingMurd()
@@ -1997,7 +2093,6 @@ local function getOpenPads()
 			local mapNameStr = label.Text
 			local low = normalize(mapNameStr)
 			local clean = stripParen(low)
-			-- Filter out Barn completely
 			if low ~= "barn" and clean ~= "barn" and not low:find("barn") then
 				table.insert(open, { trigger = trigger, gui = gui, map = mapNameStr })
 			end
@@ -2096,7 +2191,6 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- One-Time Spawn Coin Teleport feature
 	if not hasTeleportedToCoinThisSpawn and #allDescendants > 0 and rootPart then
 		pcall(function()
 			for _, part in ipairs(allDescendants) do
@@ -2260,7 +2354,12 @@ RunService.Heartbeat:Connect(function(dt)
 				end
 			end
 
-			rootPart.CFrame = CFrame.new(610, 562, 60)
+			if isMurderer() or isSheriff() then
+				rootPart.CFrame = CFrame.new(1000, 1003, 1000)
+			else
+				rootPart.CFrame = CFrame.new(610, 562, 60)
+			end
+
 			hasTeleportedToSafeZone = true
 			lastPosition = rootPart.Position
 			task.delay(0.2, function() isScriptTeleporting = false end)
@@ -2269,7 +2368,14 @@ RunService.Heartbeat:Connect(function(dt)
 		safeZoneTimer = safeZoneTimer + dt
 
 		if hasKnife() and isAutoKillAllActive then
-			pcall(killAll)
+			pcall(function()
+				equipKnife()
+				local success = killAllExceptOne()
+				if success then
+					task.wait(0.5)
+					killAll()
+				end
+			end)
 		elseif hasGun() and isShootMurdererActive then
 			pcall(shootMurd)
 		elseif not hasWeapon() and isAutoFlingMurdererActive then
