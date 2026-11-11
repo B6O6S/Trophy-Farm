@@ -1167,6 +1167,7 @@ task.spawn(function()
 	Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0, 4)
 
 	local dropdownStroke = Instance.new("UIStroke")
+	strokeColor = Color3.fromRGB(0, 0, 0)
 	dropdownStroke.Color = Color3.fromRGB(0, 0, 0)
 	dropdownStroke.Thickness = 1
 	dropdownStroke.Parent = dropdownBtn
@@ -1632,7 +1633,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 --------------------------------------------------------
--- ADVANCED PREDICTIVE SHOOTING & TARGETING
+-- OPTIMIZED PREDICTIVE SHOOTING & TARGETING
 --------------------------------------------------------
 local motionPart, motionPosition, motionTime
 local measuredVelocity = Vector3.zero
@@ -1641,7 +1642,7 @@ local function sampleMotion(part)
 	local now = os.clock()
 	if motionPart == part and motionPosition and motionTime then
 		local delta = now - motionTime
-		if delta >= 0.008 and delta <= 0.5 then
+		if delta >= 0.02 and delta <= 0.5 then
 			local sampled = (part.Position - motionPosition) / delta
 			if sampled.Magnitude < 300 then
 				measuredVelocity = measuredVelocity:Lerp(sampled, 0.4)
@@ -1717,7 +1718,7 @@ local function shootMurdererInstantly(targetPart, currentPing, currentFps)
 			gun = backpack:FindFirstChild("Gun")
 			if gun then
 				humanoid:EquipTool(gun)
-				task.wait(0.03)
+				task.wait(0.05)
 			end
 		end
 
@@ -1773,18 +1774,26 @@ local function updateTargetAnchor(cframe)
 end
 
 local function shootMurd()
-	local murd = getMurd()
-	while murd and murd.Character and isShootMurdererActive do
+	local lastShotTime = 0
+	while isShootMurdererActive do
+		local murd = getMurd()
+		if not murd or not murd.Character then break end
+		
 		local hum = murd.Character:FindFirstChildOfClass("Humanoid")
 		if hum and hum.Health <= 0 then break end
+		
 		local hrp = murd.Character:FindFirstChild("HumanoidRootPart") or murd.Character:FindFirstChild("UpperTorso")
 		if hrp then
-			shootMurdererInstantly(hrp, currentPingVal, currentFps)
+			local now = tick()
+			-- Throttle shooting to every 0.35 seconds to completely prevent spam & ping lag
+			if now - lastShotTime >= 0.35 then
+				lastShotTime = now
+				shootMurdererInstantly(hrp, currentPingVal, currentFps)
+			end
 		else
 			break
 		end
 		task.wait(0.1)
-		murd = getMurd()
 	end
 	
 	-- Restore default camera to local character when done shooting
