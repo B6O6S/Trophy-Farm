@@ -24,7 +24,7 @@ local CONFIG_FILE = "EliteAutomationSettings.json"
 
 -- Persistent Settings Data
 local settingsData = {
-	Speed = 20,
+	Speed = 60,
 	HeightOffset = 0,
 	AutoFarm = false,
 	AutoVote = false,
@@ -38,7 +38,7 @@ local settingsData = {
 	OptimizedCoins = false,
 	FpsBooster = false,
 	ShowCoinAuraBox = false,
-	AntiFling = false,
+	AntiFling = true,
 	AntiAFK = true,
 	AutoRejoin = true,
 	AntiVoid = true,
@@ -217,7 +217,7 @@ local function onCharacterAdded(char)
 		end
 		
 		safeModeCoroutine = task.spawn(function()
-			task.wait(0.1)
+			task.wait(0.5)
 			pcall(function()
 				local currentCharacter = LocalPlayer.Character
 				local currentHrp = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
@@ -1808,7 +1808,7 @@ local function shootMurdererInstantly(targetPart, currentPing, currentFps)
 
 		local murdPlayer = getMurd()
 		if murdPlayer and murdPlayer.Character then
-			camera.CameraSubject = murdPlayer.Character:FindFirstChildOfClass("Humanoid") or murdPlayer.Character.PrimaryPart
+			camera.CameraSubject = murdPlayer.Character:FindFirstChildWhichIsA("Humanoid") or murdPlayer.Character.PrimaryPart
 		end
 
 		local gun = character:FindFirstChild("Gun")
