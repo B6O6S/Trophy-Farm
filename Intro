@@ -1,0 +1,225 @@
+-- [[ ULTRA ZANWAH HUB INTRO SCRIPT (Custom Audio Volumes) ]] --
+
+-- Cleanup existing UI if executed multiple times
+if game.CoreGui:FindFirstChild("ZanwahHubIntro") then
+	game.CoreGui.ZanwahHubIntro:Destroy()
+end
+
+-- Services
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Create ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ZanwahHubIntro"
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local success = pcall(function()
+	screenGui.Parent = CoreGui
+end)
+if not success then
+	screenGui.Parent = playerGui
+end
+
+-- 1. Fullscreen Black Background Frame (Starts fully transparent, will fade in)
+local fadeFrame = Instance.new("Frame")
+fadeFrame.Name = "FadeFrame"
+fadeFrame.Size = UDim2.new(1, 0, 1, 0)
+fadeFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+fadeFrame.BackgroundTransparency = 1 -- Starts invisible
+fadeFrame.BorderSizePixel = 0
+fadeFrame.ZIndex = 1
+fadeFrame.Parent = screenGui
+
+-- 2. Main Container (Centers everything smoothly)
+local mainContainer = Instance.new("Frame")
+mainContainer.Name = "MainContainer"
+mainContainer.Size = UDim2.new(0, 400, 0, 350)
+mainContainer.Position = UDim2.new(0.5, -200, 0.5, -175)
+mainContainer.BackgroundTransparency = 1
+mainContainer.ZIndex = 2
+mainContainer.Parent = screenGui
+
+-- 3. Image Logo
+local imageLabel = Instance.new("ImageLabel")
+imageLabel.Name = "IntroImage"
+imageLabel.Size = UDim2.new(0, 110, 0, 110)
+imageLabel.Position = UDim2.new(0.5, -55, 0, 0)
+imageLabel.BackgroundTransparency = 1
+imageLabel.Image = "rbxassetid://80674954032968"
+imageLabel.ImageTransparency = 1
+imageLabel.ZIndex = 3
+imageLabel.Parent = mainContainer
+
+local imageCorner = Instance.new("UICorner")
+imageCorner.CornerRadius = UDim.new(0.2, 0)
+imageCorner.Parent = imageLabel
+
+-- 4. Title Text ("ZANWAH HUB 🎃")
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, 0, 0, 45)
+titleLabel.Position = UDim2.new(0, 0, 0, 120)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Font = Enum.Font.GothamBlack
+titleLabel.Text = "ZANWAH HUB 🎃"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextSize = 30
+titleLabel.TextTransparency = 1
+titleLabel.ZIndex = 3
+titleLabel.Parent = mainContainer
+
+-- 5. Loading Bar Background Frame
+local loadBg = Instance.new("Frame")
+loadBg.Name = "LoadBg"
+loadBg.Size = UDim2.new(0, 280, 0, 8)
+loadBg.Position = UDim2.new(0.5, -140, 0, 185)
+loadBg.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+loadBg.BackgroundTransparency = 1
+loadBg.BorderSizePixel = 0
+loadBg.ZIndex = 3
+loadBg.Parent = mainContainer
+
+local loadBgCorner = Instance.new("UICorner")
+loadBgCorner.CornerRadius = UDim.new(1, 0)
+loadBgCorner.Parent = loadBg
+
+-- Loading Bar Fill
+local loadFill = Instance.new("Frame")
+loadFill.Name = "LoadFill"
+loadFill.Size = UDim2.new(0, 0, 1, 0)
+loadFill.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+loadFill.BorderSizePixel = 0
+loadFill.ZIndex = 4
+loadFill.Parent = loadBg
+
+local loadFillCorner = Instance.new("UICorner")
+loadFillCorner.CornerRadius = UDim.new(1, 0)
+loadFillCorner.Parent = loadFill
+
+-- Loading Percentage Text
+local percentLabel = Instance.new("TextLabel")
+percentLabel.Name = "PercentLabel"
+percentLabel.Size = UDim2.new(1, 0, 0, 25)
+percentLabel.Position = UDim2.new(0, 0, 0, 200)
+percentLabel.BackgroundTransparency = 1
+percentLabel.Font = Enum.Font.GothamBold
+percentLabel.Text = "Loading... 0%"
+percentLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
+percentLabel.TextSize = 13
+percentLabel.TextTransparency = 1
+percentLabel.ZIndex = 3
+percentLabel.Parent = mainContainer
+
+-- 6. Custom Arabic Text ("يلعن سمير يا شيخ")
+local arabicLabel = Instance.new("TextLabel")
+arabicLabel.Name = "ArabicLabel"
+arabicLabel.Size = UDim2.new(1, 0, 0, 50)
+arabicLabel.Position = UDim2.new(0, 0, 0, 240)
+arabicLabel.BackgroundTransparency = 1
+arabicLabel.Font = Enum.Font.GothamBold
+arabicLabel.Text = "يلعن سمير يا شيخ"
+arabicLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+arabicLabel.TextSize = 22
+arabicLabel.TextTransparency = 1
+arabicLabel.ZIndex = 3
+arabicLabel.Parent = mainContainer
+
+-- Sound Helper Function with custom volume support
+local function playSound(soundId, customVolume)
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxassetid://" .. tostring(soundId)
+	sound.Volume = customVolume or 2
+	sound.Parent = SoundService
+	sound:Play()
+	task.spawn(function()
+		sound.Ended:Wait()
+		sound:Destroy()
+	end)
+end
+
+-- TIMELINE & SEQUENTIAL ANIMATIONS --
+task.spawn(function()
+	-- Play start sound (Volume 2) and smoothly fade background to solid black
+	playSound(4580947608, 2)
+	local bgFadeIn = TweenService:Create(fadeFrame, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0})
+	bgFadeIn:Play()
+	bgFadeIn.Completed:Wait()
+
+	task.wait(0.2)
+
+	-- STEP 1: Show Image first (Volume 2)
+	playSound(72264591133889, 2)
+	local imgTween = TweenService:Create(imageLabel, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {ImageTransparency = 0})
+	imgTween:Play()
+	imgTween.Completed:Wait()
+
+	task.wait(0.3)
+
+	-- STEP 2: Show Name (ZANWAH HUB 🎃) second (Volume 2)
+	playSound(72264591133889, 2)
+	local titleTween = TweenService:Create(titleLabel, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+	titleTween:Play()
+	titleTween.Completed:Wait()
+
+	task.wait(0.3)
+
+	-- STEP 3: Show Loading Bar third and animate it
+	TweenService:Create(loadBg, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+	TweenService:Create(percentLabel, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+	task.wait(0.2)
+
+	-- Fake Loading Bar Animation (~1.8 seconds)
+	local loadDuration = 1.8
+	local startTime = tick()
+	while tick() - startTime < loadDuration do
+		local alpha = math.clamp((tick() - startTime) / loadDuration, 0, 1)
+		local easedAlpha = math.sin(alpha * math.pi / 2) 
+		loadFill.Size = UDim2.new(easedAlpha, 0, 1, 0)
+		percentLabel.Text = "Loading... " .. math.floor(easedAlpha * 100) .. "%"
+		task.wait()
+	end
+	
+	-- 100% Full -> Turn Green and say "Done!"
+	loadFill.Size = UDim2.new(1, 0, 1, 0)
+	percentLabel.Text = "Done!"
+	
+	TweenService:Create(loadFill, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(46, 204, 113)}):Play()
+	TweenService:Create(percentLabel, TweenInfo.new(0.3), {TextColor3 = Color3.fromRGB(46, 204, 113)}):Play()
+	
+	task.wait(0.6)
+
+	-- Fade out loading bar & text smoothly
+	TweenService:Create(loadBg, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+	TweenService:Create(loadFill, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+	TweenService:Create(percentLabel, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+	task.wait(0.4)
+
+	-- STEP 4: Drop Custom Sound (Volume 5) & Flash Arabic Text ("يلعن سمير يا شيخ")
+	playSound(79823379606976, 5)
+	
+	arabicLabel.TextSize = 14
+	local arabicTweenIn = TweenService:Create(arabicLabel, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {TextTransparency = 0, TextSize = 24})
+	arabicTweenIn:Play()
+
+	-- Hold everything on screen
+	task.wait(3.5)
+
+	-- Grand Fade Out
+	local fadeOutInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(fadeFrame, fadeOutInfo, {BackgroundTransparency = 1}):Play()
+	TweenService:Create(imageLabel, fadeOutInfo, {ImageTransparency = 1}):Play()
+	TweenService:Create(titleLabel, fadeOutInfo, {TextTransparency = 1}):Play()
+	local finalOut = TweenService:Create(arabicLabel, fadeOutInfo, {TextTransparency = 1})
+	finalOut:Play()
+	finalOut.Completed:Wait()
+
+	-- Clean up UI instance entirely
+	screenGui:Destroy()
+end)
