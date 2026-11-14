@@ -82,7 +82,12 @@ end
 -- First execution flag
 _G.ZanwahHubLoaded = true
 
--- Execute the scripts
+-- Execute Intro safely (won't break everything if the link is dead/invalid)
+pcall(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Intro"))()
+end)
+
+task.wait(3)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/AutoFarm"))()
 task.wait(1)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/B6O6S/Trophy-Farm/refs/heads/main/Farm%20Progress"))()
