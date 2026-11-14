@@ -24,7 +24,7 @@ local CONFIG_FILE = "EliteAutomationSettings.json"
 
 -- Persistent Settings Data
 local settingsData = {
-	Speed = 60,
+	Speed = 20,
 	HeightOffset = 0,
 	AutoFarm = false,
 	AutoVote = false,
@@ -38,7 +38,7 @@ local settingsData = {
 	OptimizedCoins = false,
 	FpsBooster = false,
 	ShowCoinAuraBox = false,
-	AntiFling = true,
+	AntiFling = false,
 	AntiAFK = true,
 	AutoRejoin = true,
 	AntiVoid = true,
