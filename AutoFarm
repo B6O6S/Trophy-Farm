@@ -104,9 +104,10 @@ local isScriptTeleporting = false
 local lastPosition = Vector3.new(0, 0, 0)
 local isBotTeleporting = false
 
--- Safe Mode Tracking Variables (15 Seconds Timer)
-local safeModeTimer = 15
+-- Safe Mode Tracking Variables (12.3 Seconds Timer)
+local safeModeTimer = 12.3
 local safeModeCoroutine = nil
+local activeSafeModePlatform = nil
 local hasTeleportedToCoinThisSpawn = false
 
 -- Reset Player / Fling Variables
@@ -179,6 +180,15 @@ task.spawn(function()
 	end)
 end)
 
+local function cleanupSafeModePlatform()
+	if activeSafeModePlatform then
+		pcall(function()
+			activeSafeModePlatform:Destroy()
+		end)
+		activeSafeModePlatform = nil
+	end
+end
+
 -- Reset State On Respawn & Safe Mode Trigger
 local function onCharacterAdded(char)
 	isBagFull = false
@@ -192,6 +202,8 @@ local function onCharacterAdded(char)
 	visitedCoins = {}
 	trackedPickupCoins = {}
 	
+	cleanupSafeModePlatform()
+
 	local hrp = char:WaitForChild("HumanoidRootPart", 5)
 	if hrp then
 		hrp.Anchored = false
@@ -199,12 +211,33 @@ local function onCharacterAdded(char)
 	end
 
 	if isSafeModeActive then
-		safeModeTimer = 15
+		safeModeTimer = 12.3
 		if safeModeCoroutine then
 			task.cancel(safeModeCoroutine)
 		end
 		
 		safeModeCoroutine = task.spawn(function()
+			task.wait(0.1)
+			pcall(function()
+				local currentCharacter = LocalPlayer.Character
+				local currentHrp = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+				if currentHrp then
+					local targetCf = currentHrp.CFrame - Vector3.new(0, 15, 0)
+					currentHrp.CFrame = targetCf
+					
+					-- Spawn temporary platform underneath to prevent falling animation (First Teleport)
+					cleanupSafeModePlatform()
+					activeSafeModePlatform = Instance.new("Part")
+					activeSafeModePlatform.Name = "SafeModeTempPlatform"
+					activeSafeModePlatform.Size = Vector3.new(10, 1, 10)
+					activeSafeModePlatform.Position = targetCf.Position - Vector3.new(0, 3.5, 0)
+					activeSafeModePlatform.Transparency = 1
+					activeSafeModePlatform.Anchored = true
+					activeSafeModePlatform.CanCollide = true
+					activeSafeModePlatform.Parent = Workspace
+				end
+			end)
+
 			while safeModeTimer > 0 and isSafeModeActive do
 				task.wait(1)
 				safeModeTimer = safeModeTimer - 1
@@ -215,7 +248,20 @@ local function onCharacterAdded(char)
 					local currentCharacter = LocalPlayer.Character
 					local currentHrp = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
 					if currentHrp then
-						currentHrp.CFrame = currentHrp.CFrame - Vector3.new(0, 50, 0)
+						cleanupSafeModePlatform()
+						local targetCf = currentHrp.CFrame - Vector3.new(0, 50, 0)
+						currentHrp.CFrame = targetCf
+						
+						-- Spawn temporary platform underneath after the 12.3 second timer teleport
+						cleanupSafeModePlatform()
+						activeSafeModePlatform = Instance.new("Part")
+						activeSafeModePlatform.Name = "SafeModeTempPlatform"
+						activeSafeModePlatform.Size = Vector3.new(10, 1, 10)
+						activeSafeModePlatform.Position = targetCf.Position - Vector3.new(0, 3.5, 0)
+						activeSafeModePlatform.Transparency = 1
+						activeSafeModePlatform.Anchored = true
+						activeSafeModePlatform.CanCollide = true
+						activeSafeModePlatform.Parent = Workspace
 					end
 				end)
 			end
@@ -224,6 +270,20 @@ local function onCharacterAdded(char)
 end
 
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- Cleanup temporary platform when moving away from safe mode / teleporting
+RunService.Heartbeat:Connect(function()
+	if activeSafeModePlatform then
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local dist = (hrp.Position - activeSafeModePlatform.Position).Magnitude
+			if dist > 8 then
+				cleanupSafeModePlatform()
+			end
+		end
+	end
+end)
 
 -- ==================== BUILT-IN AUTO NOCLIP ====================
 RunService.Stepped:Connect(function()
@@ -1744,7 +1804,7 @@ local function shootMurdererInstantly(targetPart, currentPing, currentFps)
 		if not targetPart or not camera or not character or not humanoid or not rootPart then return end
 
 		rootPart.Anchored = false
-		rootPart.CFrame = CFrame.new(610, 562, 60)
+		rootPart.CFrame = CFrame.new(1000, 1003, 1000)
 
 		local murdPlayer = getMurd()
 		if murdPlayer and murdPlayer.Character then
@@ -2128,14 +2188,14 @@ task.spawn(function()
 							isCurrentlyVoting = true
 							isScriptTeleporting = true
 							hrp.Anchored = false
-							local safePos = target.trigger.Position + Vector3.new(0, 3, 0)
+							local safePos = target.trigger.Position + Vector3.new(0, -1.5, 0)
 							hrp.CFrame = CFrame.new(safePos)
 							lastPosition = hrp.Position
 							if firetouchinterest then
 								pcall(firetouchinterest, hrp, target.trigger, 0)
 								pcall(firetouchinterest, hrp, target.trigger, 1)
 							end
-							task.wait(0.12)
+							task.wait(0.25)
 							if hum and hum.Health > 0 then
 								votedChar = char
 								hum:ChangeState(Enum.HumanoidStateType.Dead)
@@ -2354,11 +2414,7 @@ RunService.Heartbeat:Connect(function(dt)
 				end
 			end
 
-			if isMurderer() or isSheriff() then
-				rootPart.CFrame = CFrame.new(1000, 1003, 1000)
-			else
-				rootPart.CFrame = CFrame.new(610, 562, 60)
-			end
+			rootPart.CFrame = CFrame.new(1000, 1003, 1000)
 
 			hasTeleportedToSafeZone = true
 			lastPosition = rootPart.Position
