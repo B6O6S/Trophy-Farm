@@ -55,7 +55,7 @@ if _G.ZanwahHubLoaded then
     textLabel.Position = UDim2.new(0, 10, 0, 40)
     textLabel.BackgroundTransparency = 1
     textLabel.Font = Enum.Font.GothamMedium
-    textLabel.Text = "السكربت ترا مفعل يا سميره"
+    textLabel.Text = "السكربت ترا مفعل يا سميرة"
     textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     textLabel.TextSize = 14
     textLabel.TextXAlignment = Enum.TextXAlignment.Left
