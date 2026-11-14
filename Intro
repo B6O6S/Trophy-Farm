@@ -1,4 +1,4 @@
--- [[ ULTRA ZANWAH HUB INTRO SCRIPT (Custom Audio Volumes) ]] --
+-- [[ ULTRA ZANWAH HUB INTRO SCRIPT (Final Clean Style) ]] --
 
 -- Cleanup existing UI if executed multiple times
 if game.CoreGui:FindFirstChild("ZanwahHubIntro") then
@@ -46,7 +46,7 @@ mainContainer.BackgroundTransparency = 1
 mainContainer.ZIndex = 2
 mainContainer.Parent = screenGui
 
--- 3. Image Logo
+-- 3. Image Logo (No background frame)
 local imageLabel = Instance.new("ImageLabel")
 imageLabel.Name = "IntroImage"
 imageLabel.Size = UDim2.new(0, 110, 0, 110)
@@ -57,29 +57,74 @@ imageLabel.ImageTransparency = 1
 imageLabel.ZIndex = 3
 imageLabel.Parent = mainContainer
 
-local imageCorner = Instance.new("UICorner")
-imageCorner.CornerRadius = UDim.new(0.2, 0)
-imageCorner.Parent = imageLabel
+-- 4. Title Container ("ZANWAH HUB")
+local titleContainer = Instance.new("Frame")
+titleContainer.Name = "TitleContainer"
+titleContainer.Size = UDim2.new(0, 240, 0, 45)
+titleContainer.Position = UDim2.new(0.5, -120, 0, 135)
+titleContainer.BackgroundTransparency = 1
+titleContainer.ZIndex = 3
+titleContainer.Parent = mainContainer
 
--- 4. Title Text ("ZANWAH HUB 🎃")
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "TitleLabel"
-titleLabel.Size = UDim2.new(1, 0, 0, 45)
-titleLabel.Position = UDim2.new(0, 0, 0, 120)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Font = Enum.Font.GothamBlack
-titleLabel.Text = "ZANWAH HUB 🎃"
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleLabel.TextSize = 30
-titleLabel.TextTransparency = 1
-titleLabel.ZIndex = 3
-titleLabel.Parent = mainContainer
+-- "ZANWAH" (No background, pure white text)
+local zanwahText = Instance.new("TextLabel")
+zanwahText.Name = "ZanwahText"
+zanwahText.Size = UDim2.new(0.5, 0, 1, 0)
+zanwahText.Position = UDim2.new(0, 0, 0, 0)
+zanwahText.BackgroundTransparency = 1
+zanwahText.Font = Enum.Font.GothamBlack
+zanwahText.Text = "ZANWAH"
+zanwahText.TextColor3 = Color3.fromRGB(255, 255, 255) -- White Text
+zanwahText.TextSize = 22
+zanwahText.TextTransparency = 1
+zanwahText.ZIndex = 4
+zanwahText.Parent = titleContainer
+
+-- "HUB" (Orange background box, Black text)
+local hubBox = Instance.new("Frame")
+hubBox.Name = "HubBox"
+hubBox.Size = UDim2.new(0.5, 0, 1, 0)
+hubBox.Position = UDim2.new(0.5, 0, 0, 0)
+hubBox.BackgroundColor3 = Color3.fromRGB(255, 120, 0) -- Orange background
+hubBox.BackgroundTransparency = 1 -- Fades in
+hubBox.BorderSizePixel = 0
+hubBox.ZIndex = 3
+hubBox.Parent = titleContainer
+
+local hubCorner = Instance.new("UICorner")
+hubCorner.CornerRadius = UDim.new(0.2, 0)
+hubCorner.Parent = hubBox
+
+local hubText = Instance.new("TextLabel")
+hubText.Name = "HubText"
+hubText.Size = UDim2.new(1, 0, 1, 0)
+hubText.BackgroundTransparency = 1
+hubText.Font = Enum.Font.GothamBlack
+hubText.Text = "HUB"
+hubText.TextColor3 = Color3.fromRGB(0, 0, 0) -- Black text
+hubText.TextSize = 22
+hubText.TextTransparency = 1
+hubText.ZIndex = 4
+hubText.Parent = hubBox
+
+-- Floating Pumpkin Emoji (Outside the box, no background)
+local pumpkinLabel = Instance.new("TextLabel")
+pumpkinLabel.Name = "PumpkinLabel"
+pumpkinLabel.Size = UDim2.new(0, 40, 1, 0)
+pumpkinLabel.Position = UDim2.new(1, 6, 0, 0)
+pumpkinLabel.BackgroundTransparency = 1
+pumpkinLabel.Font = Enum.Font.GothamBlack
+pumpkinLabel.Text = "🎃"
+pumpkinLabel.TextSize = 26
+pumpkinLabel.TextTransparency = 1
+pumpkinLabel.ZIndex = 4
+pumpkinLabel.Parent = titleContainer
 
 -- 5. Loading Bar Background Frame
 local loadBg = Instance.new("Frame")
 loadBg.Name = "LoadBg"
 loadBg.Size = UDim2.new(0, 280, 0, 8)
-loadBg.Position = UDim2.new(0.5, -140, 0, 185)
+loadBg.Position = UDim2.new(0.5, -140, 0, 195)
 loadBg.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 loadBg.BackgroundTransparency = 1
 loadBg.BorderSizePixel = 0
@@ -94,7 +139,7 @@ loadBgCorner.Parent = loadBg
 local loadFill = Instance.new("Frame")
 loadFill.Name = "LoadFill"
 loadFill.Size = UDim2.new(0, 0, 1, 0)
-loadFill.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+loadFill.BackgroundColor3 = Color3.fromRGB(255, 120, 0)
 loadFill.BorderSizePixel = 0
 loadFill.ZIndex = 4
 loadFill.Parent = loadBg
@@ -107,7 +152,7 @@ loadFillCorner.Parent = loadFill
 local percentLabel = Instance.new("TextLabel")
 percentLabel.Name = "PercentLabel"
 percentLabel.Size = UDim2.new(1, 0, 0, 25)
-percentLabel.Position = UDim2.new(0, 0, 0, 200)
+percentLabel.Position = UDim2.new(0, 0, 0, 210)
 percentLabel.BackgroundTransparency = 1
 percentLabel.Font = Enum.Font.GothamBold
 percentLabel.Text = "Loading... 0%"
@@ -117,15 +162,15 @@ percentLabel.TextTransparency = 1
 percentLabel.ZIndex = 3
 percentLabel.Parent = mainContainer
 
--- 6. Custom Arabic Text ("يلعن سمير يا شيخ")
+-- 6. Custom Arabic Text ("يلعن سمير يا شيخ" - Colored Red)
 local arabicLabel = Instance.new("TextLabel")
 arabicLabel.Name = "ArabicLabel"
 arabicLabel.Size = UDim2.new(1, 0, 0, 50)
-arabicLabel.Position = UDim2.new(0, 0, 0, 240)
+arabicLabel.Position = UDim2.new(0, 0, 0, 250)
 arabicLabel.BackgroundTransparency = 1
 arabicLabel.Font = Enum.Font.GothamBold
 arabicLabel.Text = "يلعن سمير يا شيخ"
-arabicLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+arabicLabel.TextColor3 = Color3.fromRGB(255, 50, 50) -- Pure Red Text
 arabicLabel.TextSize = 22
 arabicLabel.TextTransparency = 1
 arabicLabel.ZIndex = 3
@@ -162,11 +207,14 @@ task.spawn(function()
 
 	task.wait(0.3)
 
-	-- STEP 2: Show Name (ZANWAH HUB 🎃) second (Volume 2)
+	-- STEP 2: Show Connected Name & Pumpkin second (Volume 2)
 	playSound(72264591133889, 2)
-	local titleTween = TweenService:Create(titleLabel, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
-	titleTween:Play()
-	titleTween.Completed:Wait()
+	TweenService:Create(zanwahText, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0}):Play()
+	TweenService:Create(hubBox, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0}):Play()
+	TweenService:Create(hubText, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0}):Play()
+	local pumpkinTween = TweenService:Create(pumpkinLabel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {TextTransparency = 0})
+	pumpkinTween:Play()
+	pumpkinTween.Completed:Wait()
 
 	task.wait(0.3)
 
@@ -201,7 +249,7 @@ task.spawn(function()
 	TweenService:Create(percentLabel, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
 	task.wait(0.4)
 
-	-- STEP 4: Drop Custom Sound (Volume 5) & Flash Arabic Text ("يلعن سمير يا شيخ")
+	-- STEP 4: Drop Custom Sound (Volume 5) & Flash Red Arabic Text ("يلعن سمير يا شيخ")
 	playSound(79823379606976, 5)
 	
 	arabicLabel.TextSize = 14
@@ -215,7 +263,10 @@ task.spawn(function()
 	local fadeOutInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	TweenService:Create(fadeFrame, fadeOutInfo, {BackgroundTransparency = 1}):Play()
 	TweenService:Create(imageLabel, fadeOutInfo, {ImageTransparency = 1}):Play()
-	TweenService:Create(titleLabel, fadeOutInfo, {TextTransparency = 1}):Play()
+	TweenService:Create(zanwahText, fadeOutInfo, {TextTransparency = 1}):Play()
+	TweenService:Create(hubBox, fadeOutInfo, {BackgroundTransparency = 1}):Play()
+	TweenService:Create(hubText, fadeOutInfo, {TextTransparency = 1}):Play()
+	TweenService:Create(pumpkinLabel, fadeOutInfo, {TextTransparency = 1}):Play()
 	local finalOut = TweenService:Create(arabicLabel, fadeOutInfo, {TextTransparency = 1})
 	finalOut:Play()
 	finalOut.Completed:Wait()
